@@ -101,7 +101,7 @@ points so a stray remote press cannot rewrite the result; undo still works.
 ## Development
 
 ```sh
-npm test                      # 41 unit tests, no dependencies
+npm test                      # 49 unit tests, no dependencies
 python3 -m http.server 8137   # then open http://127.0.0.1:8137
 node tools/make-icons.mjs     # regenerate app icons
 ```
