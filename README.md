@@ -3,8 +3,8 @@
 A padel scoreboard for a courtside Android phone, scored from a **D10 360 Action Camera
 Remote** so players never have to touch the screen.
 
-**Scoreboard (browser):** <https://norom.github.io/d10_padel/> — touch only, see below
-**Android app:** [`android/`](android) — the version the remote can drive
+**Download the app:** [d10-padel-scoreboard.apk](https://github.com/norom/d10_padel/releases/download/v1.0/d10-padel-scoreboard.apk) — the version the remote can drive
+**Scoreboard in a browser:** <https://norom.github.io/d10_padel/> — touch only, see below
 **Button probe:** <https://norom.github.io/d10_padel/tools/d10-probe.html>
 
 ## Using it

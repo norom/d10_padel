@@ -2,6 +2,7 @@ node_modules/
 .DS_Store
 *.log
 .playwright-mcp/
+dist/
 
 # Android
 android/local.properties
@@ -9,4 +10,3 @@ android/.gradle/
 android/build/
 android/app/build/
 *.apk
-!dist/*.apk
