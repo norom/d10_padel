@@ -3,7 +3,8 @@
 A padel scoreboard for a courtside Android phone, scored from a **D10 360 Action Camera
 Remote** so players never have to touch the screen.
 
-**Scoreboard:** <https://norom.github.io/d10_padel/>
+**Scoreboard (browser):** <https://norom.github.io/d10_padel/> — touch only, see below
+**Android app:** [`android/`](android) — the version the remote can drive
 **Button probe:** <https://norom.github.io/d10_padel/tools/d10-probe.html>
 
 ## Using it
@@ -24,16 +25,52 @@ to that action — the app does not assume any particular key.
 The same four actions are on screen: **+ Team A**, **Undo**, **+ Team B**, and **New match**,
 which asks before clearing the score.
 
+## The remote needs the Android app
+
+**The D10 sends volume keys.** Pressing `S` raises the phone's volume. Chrome on Android never
+delivers volume keys to a web page — and it does not background the page either, so
+`tools/d10-probe.html` recorded nothing at all on any channel rather than something suspicious.
+Silence was the finding.
+
+That rules out the browser for the remote, and Web Bluetooth with it, since the D10 is bonded
+as an HID device and HID sits on the Web Bluetooth blocklist. An Android activity, unlike a
+page, is offered every key before the system acts on it, so the remote works in the wrapper app
+in [`android/`](android).
+
+| | Browser (PWA) | Android app |
+| --- | --- | --- |
+| Touch controls | yes | yes |
+| D10 remote | **no** — Chrome discards volume keys | **yes** |
+| Offline | yes, after first load | yes, nothing is ever fetched |
+
+The scoreboard is identical in both; the wrapper adds about a hundred lines whose only job is
+to read the key and hand its code to the page.
+
 ## Why the buttons are bound rather than hardcoded
 
-A BLE camera remote can reach a web page as an HID keyboard, as media keys, as a gamepad, or
-not at all — Chrome on Android never delivers volume keys to a page, and camera remotes often
-send exactly those. Rather than guess, the app listens on every channel at once and matches
-what arrives against the bindings.
+The app never assumes a key. It listens on every channel available — keyboard, media session,
+gamepad, text input, and the native bridge — reduces each press to a comparable signature, and
+matches that against the bindings you record. That is why the wrapper did not need anyone to
+work out what A, B and S send: you press them and it binds whatever arrives.
 
-`tools/d10-probe.html` reports which channel each button lands on, and whether the press
-reaches the browser at all. If it turns out nothing does, the fallback is a native Android app
-using `KeyEvent` — the scoring engine moves across unchanged.
+## Building the Android app
+
+```sh
+cd android
+ANDROID_HOME=/path/to/android-sdk ./gradlew assembleDebug
+# app/build/outputs/apk/debug/app-debug.apk
+```
+
+Needs JDK 17 and an SDK with `platforms;android-34` and `build-tools;34.0.0`. The web app is
+staged into the APK at build time from the repository root, so there is only ever one copy of
+the scoreboard.
+
+Install by copying the APK to the phone and opening it — Android will ask you to allow
+installing from that source. The app requests **no permissions**.
+
+While the scoreboard is on screen the remote's buttons are score buttons: volume keys are
+consumed rather than passed to the system, so the volume does not move while you play. Back
+still exits.
 
 ## Design
 

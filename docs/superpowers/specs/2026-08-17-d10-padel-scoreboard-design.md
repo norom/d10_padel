@@ -1,8 +1,29 @@
 # D10 Padel Scoreboard — Design
 
 **Date:** 2026-08-17
-**Status:** Approved, in implementation
+**Status:** Implemented. Probe answered — see "Probe outcome" below.
 **Repo:** https://github.com/norom/d10_padel
+
+## Probe outcome (2026-08-17)
+
+The probe reported **nothing on any channel**, including no focus loss. That reading has
+exactly one common cause besides a disconnected remote: a key Android consumes silently. It was
+confirmed directly — pressing `S` raises the phone's volume.
+
+So the D10 sends volume keys. Chrome never delivers those to a page and does not background the
+page either, which is why every counter stayed at zero. Consequences:
+
+- **Rung 1 (browser key events): dead.** No API exposes a volume key press to a page.
+- **Rung 2 (Web Bluetooth): dead.** The device is bonded as HID, and HID is on the Web
+  Bluetooth blocklist, so a page cannot claim it.
+- **Rung 3 (native `KeyEvent`): works.** An activity is offered every key before the system
+  acts on it, and can consume it.
+
+The browser build remains the touch-only scoreboard. The remote is served by a WebView wrapper
+in `android/` that forwards key codes into the same page. The prediction below — that only the
+adapter layer would change — held: the scoring engine, storage, and UI moved across untouched,
+and the runtime binding decision meant the wrapper never needed to know which codes A, B and S
+produce.
 
 ## Problem
 
