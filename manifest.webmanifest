@@ -1,0 +1,33 @@
+{
+  "name": "Padel Scoreboard",
+  "short_name": "Padel",
+  "description": "Courtside padel scoreboard scored from a D10 remote.",
+  "start_url": "./",
+  "scope": "./",
+  "id": "d10-padel-scoreboard",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
+  "background_color": "#080d13",
+  "theme_color": "#080d13",
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

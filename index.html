@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Padel Scoreboard</title>
+<meta name="description" content="Courtside padel scoreboard scored from a D10 remote.">
+<meta name="theme-color" content="#080d13">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon-192.png" sizes="192x192">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+
+<div class="board">
+
+  <header class="bar">
+    <span class="format" id="format">Best of 3</span>
+    <button class="bar-btn" id="fullscreenBtn" title="Full screen" aria-label="Full screen">⛶</button>
+    <button class="bar-btn" id="remoteBtn">Remote</button>
+    <button class="bar-btn" id="newBtn">New match</button>
+  </header>
+
+  <main class="court">
+    <section class="side side--a" id="sideA">
+      <h2 class="team">Team A</h2>
+      <div class="score" id="scoreA">0</div>
+      <dl class="stats">
+        <div class="stat"><dt>Sets</dt><dd id="setsA">0</dd></div>
+        <div class="stat"><dt>Games</dt><dd id="gamesA">0</dd></div>
+      </dl>
+    </section>
+
+    <div class="net"><span class="net-badge" id="netBadge"></span></div>
+
+    <span class="score score-probe" id="scoreProbe" aria-hidden="true">AD</span>
+
+    <section class="side side--b" id="sideB">
+      <h2 class="team">Team B</h2>
+      <div class="score" id="scoreB">0</div>
+      <dl class="stats">
+        <div class="stat"><dt>Sets</dt><dd id="setsB">0</dd></div>
+        <div class="stat"><dt>Games</dt><dd id="gamesB">0</dd></div>
+      </dl>
+    </section>
+  </main>
+
+  <footer class="controls">
+    <button class="control control--a" id="btnA">+ Team A</button>
+    <button class="control control--undo" id="btnUndo">Undo</button>
+    <button class="control control--b" id="btnB">+ Team B</button>
+  </footer>
+
+</div>
+
+<!-- New match confirmation -->
+<div class="sheet" id="confirmSheet" hidden>
+  <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <h2 id="confirmTitle">Start a new match?</h2>
+    <p id="confirmBody">The current score will be cleared. This cannot be undone.</p>
+    <div class="sheet-actions">
+      <button id="confirmCancel">Keep playing</button>
+      <button id="confirmOk" class="danger">New match</button>
+    </div>
+  </div>
+</div>
+
+<!-- Remote button binding -->
+<div class="sheet" id="bindSheet" hidden>
+  <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="bindTitle">
+    <h2 id="bindTitle">Remote buttons</h2>
+    <p>Tap a row, then press that button on the D10. Whatever the remote sends
+       gets bound to the action.</p>
+    <div class="bind-list">
+      <button class="bind-row" data-action="POINT_A">
+        <span class="what">Point A</span><span class="bound">not set</span>
+      </button>
+      <button class="bind-row" data-action="POINT_B">
+        <span class="what">Point B</span><span class="bound">not set</span>
+      </button>
+      <button class="bind-row" data-action="UNDO">
+        <span class="what">Undo</span><span class="bound">not set</span>
+      </button>
+    </div>
+    <p id="bindNote">Nothing captured means Android handled the press before the
+       page saw it — volume keys behave that way in Chrome.</p>
+    <div class="sheet-actions">
+      <button id="bindClear">Clear all</button>
+      <button id="bindDone" class="danger">Done</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="./src/app.js"></script>
+</body>
+</html>

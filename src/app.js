@@ -1,0 +1,121 @@
+/**
+ * Wiring: remote and touch input in, scoreboard out, everything persisted.
+ */
+
+import { derive, addPoint, undo } from "./match.js";
+import { createStore } from "./storage.js";
+import { createUI } from "./ui.js";
+import { ACTIONS, createInputRouter } from "./input.js";
+
+const store = createStore(window.localStorage);
+
+let { points, bindings } = store.load();
+
+const ui = createUI({
+  onPoint: score,
+  onUndo: undoPoint,
+  onNewMatch: newMatch,
+  onOpenBindings: openBindings,
+  onCloseBindings: () => router.cancelCapture(),
+  onClearBindings: clearBindings,
+  onCaptureBinding: captureBinding,
+});
+
+const router = createInputRouter({
+  getBindings: () => bindings,
+  onAction: (action) => {
+    if (action === ACTIONS.POINT_A) score("A");
+    else if (action === ACTIONS.POINT_B) score("B");
+    else if (action === ACTIONS.UNDO) undoPoint();
+  },
+});
+
+// ------------------------------------------------------------------ actions
+
+function score(team) {
+  const next = addPoint(points, team);
+  if (next === points) return; // match already decided
+
+  points = next;
+  store.savePoints(points);
+  ui.render(derive(points));
+  ui.flash(team);
+}
+
+function undoPoint() {
+  if (points.length === 0) return;
+
+  points = undo(points);
+  store.savePoints(points);
+  ui.render(derive(points));
+}
+
+function newMatch() {
+  points = [];
+  store.clearMatch();
+  ui.render(derive(points));
+}
+
+// ----------------------------------------------------------------- bindings
+
+function openBindings() {
+  // Media buttons only reach a page holding a media session, and claiming one
+  // needs a user gesture — opening this screen is that gesture.
+  router.enableMediaSession();
+  ui.renderBindings(bindings);
+}
+
+function captureBinding(action) {
+  router.captureNext((signature) => {
+    bindings = { ...bindings, [action]: signature };
+    store.saveBindings(bindings);
+    ui.renderBindings(bindings);
+  });
+}
+
+function clearBindings() {
+  bindings = {};
+  store.saveBindings(bindings);
+  router.cancelCapture();
+  ui.renderBindings(bindings);
+}
+
+// -------------------------------------------------------------- screen wake
+
+let wakeLock = null;
+
+async function keepAwake() {
+  if (!("wakeLock" in navigator)) return;
+
+  try {
+    wakeLock = await navigator.wakeLock.request("screen");
+    wakeLock.addEventListener("release", () => {
+      wakeLock = null;
+    });
+  } catch {
+    // Denied or unsupported. The scoreboard still works, the screen just sleeps.
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && !wakeLock) keepAwake();
+});
+
+// ------------------------------------------------------------------- start
+
+router.start();
+ui.render(derive(points));
+ui.renderBindings(bindings);
+
+// A wake lock needs a user gesture on some builds, so try immediately and
+// again on the first interaction.
+keepAwake();
+document.addEventListener("pointerdown", () => keepAwake(), { once: true });
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(() => {
+      // Offline support is best-effort; the app runs without it.
+    });
+  });
+}
