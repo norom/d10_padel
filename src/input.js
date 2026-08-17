@@ -32,14 +32,19 @@ export function actionForPressCount(count) {
 }
 
 /**
- * Collects presses that arrive close together and reports how many there were.
- * Every press restarts the window, so a chain is only resolved once it stops.
+ * Counts presses that arrive close together, reporting the running total on
+ * every press rather than waiting for the chain to end.
+ *
+ * Reporting immediately is what makes one button usable: the first press shows
+ * a result at once, and a second press corrects it. Waiting for a window to
+ * close instead makes every press feel slow and forces the user to guess the
+ * timing blind, which is exactly how a double press turns into two singles.
  *
  * The timer functions are injectable so press timing can be tested without
  * waiting on a real clock.
  */
-export function createPressCounter({
-  windowMs = 450,
+export function createPressChain({
+  windowMs = 1200,
   onCount,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
@@ -47,24 +52,21 @@ export function createPressCounter({
   let count = 0;
   let timer = null;
 
+  const forget = () => {
+    if (timer !== null) clearTimer(timer);
+    timer = null;
+    count = 0;
+  };
+
   return {
     press() {
       count += 1;
       if (timer !== null) clearTimer(timer);
-
-      timer = setTimer(() => {
-        const total = count;
-        count = 0;
-        timer = null;
-        onCount(total);
-      }, windowMs);
+      timer = setTimer(forget, windowMs);
+      onCount(count);
     },
 
-    reset() {
-      if (timer !== null) clearTimer(timer);
-      timer = null;
-      count = 0;
-    },
+    reset: forget,
   };
 }
 
@@ -259,11 +261,13 @@ function inaudibleLoopSource(seconds = 10) {
 export function createInputRouter({
   getBindings,
   onAction,
+  onGesture,
   onSignature,
   repeatWindowMs = 400,
-  // Generous rather than tight: mistiming a double press costs two wrong
-  // points and an undo to fix, while a longer window only delays the flash.
-  gestureWindowMs = 450,
+  // Nothing waits on this window, because each press is applied at once and
+  // the next one corrects it. That means it can be generous without making a
+  // single press feel slow.
+  gestureWindowMs = 1200,
   // The browser channels keep a hidden field focused so the document receives
   // key events. The Android wrapper gets keys natively instead, and a focused
   // field there only risks summoning the on-screen keyboard.
@@ -277,12 +281,9 @@ export function createInputRouter({
   // delivery of the same press.
   const GESTURE_GUARD_MS = 60;
 
-  const presses = createPressCounter({
+  const presses = createPressChain({
     windowMs: gestureWindowMs,
-    onCount(count) {
-      const action = actionForPressCount(count);
-      if (action) onAction(action);
-    },
+    onCount: (count) => onGesture(count),
   });
 
   let captureHandler = null;

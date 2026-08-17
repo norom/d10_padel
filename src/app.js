@@ -2,10 +2,10 @@
  * Wiring: remote and touch input in, scoreboard out, everything persisted.
  */
 
-import { derive, addPoint, undo } from "./match.js";
+import { derive, addPoint, undo, applyOutcome } from "./match.js";
 import { createStore } from "./storage.js";
 import { createUI } from "./ui.js";
-import { ACTIONS, createInputRouter, setBinding } from "./input.js";
+import { ACTIONS, createInputRouter, setBinding, actionForPressCount } from "./input.js";
 
 /** True when running inside the Android wrapper rather than a browser tab. */
 const IN_WRAPPER = navigator.userAgent.includes("D10Wrapper");
@@ -35,7 +35,39 @@ const router = createInputRouter({
     else if (action === ACTIONS.POINT_B) score("B");
     else if (action === ACTIONS.UNDO) undoPoint();
   },
+  onGesture: scoreFromPressCount,
 });
+
+/**
+ * One button, scored by how many times it was pressed.
+ *
+ * Each press is applied immediately against the state the chain began from, so
+ * the first press scores Team A at once and a second press replaces that with a
+ * point to Team B rather than adding to it. Nothing waits, and a fumble of four
+ * or more presses lands back exactly where it started.
+ */
+let chainStart = null;
+
+const OUTCOMES = {
+  [ACTIONS.POINT_A]: "A",
+  [ACTIONS.POINT_B]: "B",
+  [ACTIONS.UNDO]: "UNDO",
+};
+
+function scoreFromPressCount(count) {
+  if (count === 1) chainStart = points;
+
+  const outcome = OUTCOMES[actionForPressCount(count)] || null;
+  const next = applyOutcome(chainStart, outcome);
+
+  // A decided match still refuses new points, exactly as the buttons do.
+  if (outcome !== "UNDO" && derive(chainStart).matchOver) return;
+
+  points = next;
+  store.savePoints(points);
+  ui.render(derive(points));
+  if (outcome === "A" || outcome === "B") ui.flash(outcome);
+}
 
 // ------------------------------------------------------------------ actions
 

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  createPressCounter,
+  createPressChain,
   actionForPressCount,
   setBinding,
   ACTIONS,
@@ -193,54 +193,61 @@ function fakeTimers() {
   };
 }
 
-test("one press resolves to a single count", () => {
+test("a press reports its running count straight away", () => {
   const timers = fakeTimers();
   const counts = [];
-  const counter = createPressCounter({ onCount: (n) => counts.push(n), ...timers });
+  const chain = createPressChain({ onCount: (n) => counts.push(n), ...timers });
 
-  counter.press();
-  timers.fire();
+  chain.press();
 
-  assert.deepEqual(counts, [1]);
+  assert.deepEqual(counts, [1], "must not wait for the window to close");
 });
 
-test("presses inside the window accumulate into one count", () => {
+test("each further press reports the growing count", () => {
   const timers = fakeTimers();
   const counts = [];
-  const counter = createPressCounter({ onCount: (n) => counts.push(n), ...timers });
+  const chain = createPressChain({ onCount: (n) => counts.push(n), ...timers });
 
-  counter.press();
-  counter.press();
-  counter.press();
-  timers.fire();
+  chain.press();
+  chain.press();
+  chain.press();
 
-  assert.deepEqual(counts, [3]);
+  assert.deepEqual(counts, [1, 2, 3]);
 });
 
-test("each press restarts the window, so nothing resolves early", () => {
+test("a chain starts over once the window closes", () => {
   const timers = fakeTimers();
   const counts = [];
-  const counter = createPressCounter({ onCount: (n) => counts.push(n), ...timers });
+  const chain = createPressChain({ onCount: (n) => counts.push(n), ...timers });
 
-  counter.press();
-  counter.press();
+  chain.press();
+  chain.press();
+  timers.fire();
+  chain.press();
 
-  assert.deepEqual(counts, [], "must wait for the chain to finish");
+  assert.deepEqual(counts, [1, 2, 1], "a count of 1 marks a fresh chain");
+});
+
+test("each press pushes the window back", () => {
+  const timers = fakeTimers();
+  const chain = createPressChain({ onCount: () => {}, ...timers });
+
+  chain.press();
+  chain.press();
+
   assert.equal(timers.isPending(), true);
 });
 
-test("the count resets after it resolves", () => {
+test("resetting abandons the chain", () => {
   const timers = fakeTimers();
   const counts = [];
-  const counter = createPressCounter({ onCount: (n) => counts.push(n), ...timers });
+  const chain = createPressChain({ onCount: (n) => counts.push(n), ...timers });
 
-  counter.press();
-  timers.fire();
-  counter.press();
-  counter.press();
-  timers.fire();
+  chain.press();
+  chain.reset();
+  chain.press();
 
-  assert.deepEqual(counts, [1, 2]);
+  assert.deepEqual(counts, [1, 1]);
 });
 
 test("press counts map to the three scoring actions", () => {
