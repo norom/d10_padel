@@ -59,6 +59,10 @@ body {
 /* ------------------------------------------------------------------ shell */
 
 .board {
+  /* dvh is the one that copes with a retracting address bar, but it is only
+     understood from Chrome 108. The vh line keeps older WebViews full height
+     instead of collapsing the board to its content. */
+  height: 100vh;
   height: 100dvh;
   display: flex;
   flex-direction: column;
@@ -72,7 +76,6 @@ body {
   flex: 0 0 var(--bar-h);
   display: flex;
   align-items: center;
-  gap: 8px;
   padding: 0 10px;
   background: var(--bar);
   border-bottom: 1px solid var(--rule);
@@ -85,6 +88,10 @@ body {
   color: var(--ink-faint);
   margin-right: auto;
   white-space: nowrap;
+}
+
+.bar-btn + .bar-btn {
+  margin-left: 8px;
 }
 
 .bar-btn {
@@ -131,7 +138,6 @@ body {
   /* Spread rather than centre: in portrait the column is tall and a centred
      cluster leaves the field looking empty above and below. */
   justify-content: space-evenly;
-  gap: clamp(6px, 1.8vmin, 18px);
   padding: clamp(10px, 3vmin, 34px) 8px;
   position: relative;
   min-width: 0;
@@ -146,7 +152,10 @@ body {
 .side::after {
   content: "";
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: -1;
   opacity: 0;
   pointer-events: none;
@@ -197,17 +206,22 @@ body {
   color: var(--ball);
 }
 
+/* Spacing between flex children is done with margins throughout, not `gap`:
+   flexbox gap only arrived in Chrome 84, and a WebView can trail well behind
+   the phone's Android version. Margins behave the same everywhere. */
 .stats {
   margin: 0;
   display: flex;
-  gap: clamp(14px, 5vmin, 44px);
+}
+
+.stat + .stat {
+  margin-left: clamp(14px, 5vmin, 44px);
 }
 
 .stat {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
 }
 
 .stat dt {
@@ -215,6 +229,10 @@ body {
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink-soft);
+}
+
+.stat dt + dd {
+  margin-top: 2px;
 }
 
 /* Games decide the set, so this is the second thing read from the court and
@@ -265,10 +283,13 @@ body {
 .controls {
   flex: 0 0 var(--controls-h);
   display: flex;
-  gap: 6px;
   padding: 8px;
   background: var(--bar);
   border-top: 1px solid var(--rule);
+}
+
+.control + .control {
+  margin-left: 6px;
 }
 
 .control {
@@ -308,7 +329,13 @@ body {
 
 .sheet {
   position: fixed;
-  inset: 0;
+  /* Longhands rather than `inset`, which is only understood from Chrome 87.
+     Where it is dropped the overlay collapses to its static position and the
+     dialog silently never appears. */
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   background: rgba(4, 8, 12, 0.86);
   display: flex;
   align-items: center;
@@ -331,7 +358,10 @@ body {
   padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+}
+
+.sheet-card > * + * {
+  margin-top: 14px;
 }
 
 .sheet h2 {
@@ -350,7 +380,10 @@ body {
 
 .sheet-actions {
   display: flex;
-  gap: 8px;
+}
+
+.sheet-actions button + button {
+  margin-left: 8px;
 }
 
 .sheet-actions button {
@@ -377,13 +410,15 @@ body {
 .bind-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+}
+
+.bind-row + .bind-row {
+  margin-top: 8px;
 }
 
 .bind-row {
   display: flex;
   align-items: center;
-  gap: 10px;
   padding: 11px 12px;
   background: #131b25;
   border: 1px solid var(--rule);
@@ -394,6 +429,10 @@ body {
   color: var(--ink);
   font-family: var(--display);
   min-height: 56px;
+}
+
+.bind-row .bound {
+  margin-left: 10px;
 }
 
 .bind-row .what {
