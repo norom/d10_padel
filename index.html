@@ -75,16 +75,33 @@
     <h2 id="bindTitle">Remote buttons</h2>
     <p>Tap a row, then press that button on the D10. Whatever the remote sends
        gets bound to the action.</p>
-    <div class="bind-list">
-      <button class="bind-row" data-action="POINT_A">
-        <span class="what">Point A</span><span class="bound">not set</span>
-      </button>
-      <button class="bind-row" data-action="POINT_B">
-        <span class="what">Point B</span><span class="bound">not set</span>
-      </button>
-      <button class="bind-row" data-action="UNDO">
-        <span class="what">Undo</span><span class="bound">not set</span>
-      </button>
+
+    <div class="bind-group">
+      <span class="bind-group-title">Score everything with one button</span>
+      <div class="bind-list">
+        <button class="bind-row" data-action="GESTURE">
+          <span class="what">One button</span><span class="bound">not set</span>
+        </button>
+      </div>
+      <p class="bind-hint">
+        Press it once for Team A, twice for Team B, three times to undo.
+        Use this if only one of the remote's buttons registers below.
+      </p>
+    </div>
+
+    <div class="bind-group">
+      <span class="bind-group-title">Or one button per action</span>
+      <div class="bind-list">
+        <button class="bind-row" data-action="POINT_A">
+          <span class="what">Point A</span><span class="bound">not set</span>
+        </button>
+        <button class="bind-row" data-action="POINT_B">
+          <span class="what">Point B</span><span class="bound">not set</span>
+        </button>
+        <button class="bind-row" data-action="UNDO">
+          <span class="what">Undo</span><span class="bound">not set</span>
+        </button>
+      </div>
     </div>
     <p id="bindNote">Nothing captured means Android handled the press before the
        page saw it — volume keys behave that way in Chrome.</p>

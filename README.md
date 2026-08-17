@@ -16,11 +16,27 @@ after the first load and remembers the match if it gets closed.
 scoreboard, tap a row, and press that button on the remote. Whatever the remote sends is bound
 to that action — the app does not assume any particular key.
 
-| Remote | Action |
+### Only one D10 button reaches Android
+
+On the unit this was built against, **`S` is the only button any app can hear.** It sends
+volume up. `A` and `B` produce no Android input at all — not a key event, not a media button,
+nothing — because they drive the camera over the vendor's own BLE service rather than acting as
+a keyboard. No third-party app can receive them.
+
+So the whole match is scored from `S`, by how many times it is pressed:
+
+| Press `S` | Action |
 | --- | --- |
-| `A` | Point to Team A |
-| `B` | Point to Team B |
-| `S` | Undo |
+| once | Point to Team A |
+| twice | Point to Team B |
+| three times | Undo |
+
+Presses chain while they keep arriving within 450ms of each other, so the score settles about
+half a second after you stop pressing. Four or more presses does nothing — a fumble should not
+undo a point.
+
+Bind it under **Score everything with one button**. If you use a remote where separate buttons
+do register, bind them under **Or one button per action** instead; both work.
 
 The same four actions are on screen: **+ Team A**, **Undo**, **+ Team B**, and **New match**,
 which asks before clearing the score.

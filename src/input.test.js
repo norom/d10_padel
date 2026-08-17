@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  createPressCounter,
+  actionForPressCount,
+  setBinding,
   ACTIONS,
   keyboardSignature,
   mediaSignature,
@@ -164,4 +167,137 @@ test("a different button is never suppressed", () => {
 
   assert.equal(accepts(a, 1000), true);
   assert.equal(accepts(b, 1010), true);
+});
+
+// ------------------------------------------------------- one-button gestures
+
+/** A controllable stand-in for setTimeout, so press timing is deterministic. */
+function fakeTimers() {
+  let pending = null;
+  let nextId = 0;
+
+  return {
+    setTimer(fn) {
+      pending = fn;
+      return ++nextId;
+    },
+    clearTimer() {
+      pending = null;
+    },
+    fire() {
+      const fn = pending;
+      pending = null;
+      if (fn) fn();
+    },
+    isPending: () => pending !== null,
+  };
+}
+
+test("one press resolves to a single count", () => {
+  const timers = fakeTimers();
+  const counts = [];
+  const counter = createPressCounter({ onCount: (n) => counts.push(n), ...timers });
+
+  counter.press();
+  timers.fire();
+
+  assert.deepEqual(counts, [1]);
+});
+
+test("presses inside the window accumulate into one count", () => {
+  const timers = fakeTimers();
+  const counts = [];
+  const counter = createPressCounter({ onCount: (n) => counts.push(n), ...timers });
+
+  counter.press();
+  counter.press();
+  counter.press();
+  timers.fire();
+
+  assert.deepEqual(counts, [3]);
+});
+
+test("each press restarts the window, so nothing resolves early", () => {
+  const timers = fakeTimers();
+  const counts = [];
+  const counter = createPressCounter({ onCount: (n) => counts.push(n), ...timers });
+
+  counter.press();
+  counter.press();
+
+  assert.deepEqual(counts, [], "must wait for the chain to finish");
+  assert.equal(timers.isPending(), true);
+});
+
+test("the count resets after it resolves", () => {
+  const timers = fakeTimers();
+  const counts = [];
+  const counter = createPressCounter({ onCount: (n) => counts.push(n), ...timers });
+
+  counter.press();
+  timers.fire();
+  counter.press();
+  counter.press();
+  timers.fire();
+
+  assert.deepEqual(counts, [1, 2]);
+});
+
+test("press counts map to the three scoring actions", () => {
+  assert.equal(actionForPressCount(1), ACTIONS.POINT_A);
+  assert.equal(actionForPressCount(2), ACTIONS.POINT_B);
+  assert.equal(actionForPressCount(3), ACTIONS.UNDO);
+});
+
+test("a longer burst does nothing rather than guessing", () => {
+  // Four presses is a fumble, not an instruction. Undoing on it would be worse
+  // than ignoring it, because an undo is what you cannot easily take back.
+  assert.equal(actionForPressCount(4), null);
+  assert.equal(actionForPressCount(0), null);
+});
+
+// ------------------------------------------------------- binding exclusivity
+
+test("binding a button to an action assigns it", () => {
+  const next = setBinding({}, ACTIONS.POINT_A, androidSignature(24, "VOLUME_UP"));
+
+  assert.equal(signatureKey(next[ACTIONS.POINT_A]), signatureKey(androidSignature(24, "VOLUME_UP")));
+});
+
+test("binding a button that is already used frees it from the other action", () => {
+  // One button cannot mean two things, and findAction would otherwise resolve
+  // it to whichever key happened to be enumerated first.
+  const volumeUp = androidSignature(24, "VOLUME_UP");
+  const first = setBinding({}, ACTIONS.POINT_A, volumeUp);
+
+  const second = setBinding(first, ACTIONS.GESTURE, volumeUp);
+
+  assert.equal(second[ACTIONS.POINT_A], undefined);
+  assert.equal(signatureKey(second[ACTIONS.GESTURE]), signatureKey(volumeUp));
+});
+
+test("binding a different button leaves existing bindings alone", () => {
+  const first = setBinding({}, ACTIONS.POINT_A, androidSignature(24, "VOLUME_UP"));
+  const second = setBinding(first, ACTIONS.POINT_B, androidSignature(25, "VOLUME_DOWN"));
+
+  assert.equal(signatureKey(second[ACTIONS.POINT_A]), signatureKey(androidSignature(24, "VOLUME_UP")));
+  assert.equal(signatureKey(second[ACTIONS.POINT_B]), signatureKey(androidSignature(25, "VOLUME_DOWN")));
+});
+
+test("a gesture button resolves to the gesture action", () => {
+  const bindings = setBinding({}, ACTIONS.GESTURE, androidSignature(24, "VOLUME_UP"));
+
+  assert.equal(findAction(androidSignature(24, "VOLUME_UP"), bindings), ACTIONS.GESTURE);
+});
+
+// --------------------------------------------------- repeat filter windowing
+
+test("the repeat filter accepts a shorter window when asked", () => {
+  // Gesture presses are deliberate and close together, so they need a tighter
+  // guard than the one that stops a held button scoring twice.
+  const accepts = createRepeatFilter(400);
+
+  assert.equal(accepts("k", 1000), true);
+  assert.equal(accepts("k", 1150), false, "default window still rejects");
+  assert.equal(accepts("k", 1300, 60), true, "explicit short window allows it");
 });

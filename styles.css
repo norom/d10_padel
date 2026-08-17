@@ -505,3 +505,25 @@ body {
   font-family: var(--display);
   font-size: 12.5px;
 }
+
+/* ------------------------------------------------------------ bind groups */
+
+.bind-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.bind-group-title {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 7px;
+}
+
+.bind-hint {
+  margin-top: 7px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-faint);
+}

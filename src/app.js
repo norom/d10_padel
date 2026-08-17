@@ -5,7 +5,7 @@
 import { derive, addPoint, undo } from "./match.js";
 import { createStore } from "./storage.js";
 import { createUI } from "./ui.js";
-import { ACTIONS, createInputRouter } from "./input.js";
+import { ACTIONS, createInputRouter, setBinding } from "./input.js";
 
 /** True when running inside the Android wrapper rather than a browser tab. */
 const IN_WRAPPER = navigator.userAgent.includes("D10Wrapper");
@@ -74,7 +74,9 @@ function openBindings() {
 
 function captureBinding(action) {
   router.captureNext((signature) => {
-    bindings = { ...bindings, [action]: signature };
+    // setBinding frees the button from whatever else it was bound to, so the
+    // same press cannot mean two things.
+    bindings = setBinding(bindings, action, signature);
     store.saveBindings(bindings);
     ui.renderBindings(bindings);
   });

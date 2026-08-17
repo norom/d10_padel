@@ -14,7 +14,76 @@ export const ACTIONS = {
   POINT_A: "POINT_A",
   POINT_B: "POINT_B",
   UNDO: "UNDO",
+  // One button that scores everything by how many times it is pressed. The D10
+  // only has one button Android can hear, so this is how the whole match gets
+  // scored from the remote.
+  GESTURE: "GESTURE",
 };
+
+/** How many presses mean what. Four or more is a fumble and means nothing. */
+const PRESS_ACTIONS = {
+  1: ACTIONS.POINT_A,
+  2: ACTIONS.POINT_B,
+  3: ACTIONS.UNDO,
+};
+
+export function actionForPressCount(count) {
+  return PRESS_ACTIONS[count] || null;
+}
+
+/**
+ * Collects presses that arrive close together and reports how many there were.
+ * Every press restarts the window, so a chain is only resolved once it stops.
+ *
+ * The timer functions are injectable so press timing can be tested without
+ * waiting on a real clock.
+ */
+export function createPressCounter({
+  windowMs = 450,
+  onCount,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+}) {
+  let count = 0;
+  let timer = null;
+
+  return {
+    press() {
+      count += 1;
+      if (timer !== null) clearTimer(timer);
+
+      timer = setTimer(() => {
+        const total = count;
+        count = 0;
+        timer = null;
+        onCount(total);
+      }, windowMs);
+    },
+
+    reset() {
+      if (timer !== null) clearTimer(timer);
+      timer = null;
+      count = 0;
+    },
+  };
+}
+
+/**
+ * Assign a button to an action, taking it away from any other action first.
+ * One button cannot mean two things, and a signature bound twice would resolve
+ * to whichever action happened to be enumerated first.
+ */
+export function setBinding(bindings, action, signature) {
+  const key = signatureKey(signature);
+  const next = {};
+
+  for (const [name, bound] of Object.entries(bindings || {})) {
+    if (bound && signatureKey(bound) !== key) next[name] = bound;
+  }
+
+  next[action] = signature;
+  return next;
+}
 
 export const CHANNELS = {
   KEYBOARD: "keyboard",
@@ -124,9 +193,11 @@ export function describeSignature(signature) {
 export function createRepeatFilter(windowMs) {
   const lastSeen = new Map();
 
-  return (key, now) => {
+  // Gesture presses are deliberate and close together, so the caller can ask
+  // for a tighter guard than the one that stops a held button scoring twice.
+  return (key, now, window = windowMs) => {
     const previous = lastSeen.get(key);
-    if (previous !== undefined && now - previous < windowMs) return false;
+    if (previous !== undefined && now - previous < window) return false;
 
     lastSeen.set(key, now);
     return true;
@@ -190,6 +261,9 @@ export function createInputRouter({
   onAction,
   onSignature,
   repeatWindowMs = 400,
+  // Generous rather than tight: mistiming a double press costs two wrong
+  // points and an undo to fix, while a longer window only delays the flash.
+  gestureWindowMs = 450,
   // The browser channels keep a hidden field focused so the document receives
   // key events. The Android wrapper gets keys natively instead, and a focused
   // field there only risks summoning the on-screen keyboard.
@@ -198,12 +272,30 @@ export function createInputRouter({
   const accepts = createRepeatFilter(repeatWindowMs);
   const padButtons = new Map();
 
+  // A gesture chain is deliberate rapid pressing, so it needs a guard tight
+  // enough to let a second press through while still dropping a duplicate
+  // delivery of the same press.
+  const GESTURE_GUARD_MS = 60;
+
+  const presses = createPressCounter({
+    windowMs: gestureWindowMs,
+    onCount(count) {
+      const action = actionForPressCount(count);
+      if (action) onAction(action);
+    },
+  });
+
   let captureHandler = null;
   let audio = null;
   let started = false;
 
   function receive(signature, event) {
-    if (!accepts(signatureKey(signature), Date.now())) return;
+    const bound = captureHandler ? null : findAction(signature, getBindings());
+    const isGesture = bound === ACTIONS.GESTURE;
+
+    if (!accepts(signatureKey(signature), Date.now(), isGesture ? GESTURE_GUARD_MS : undefined)) {
+      return;
+    }
 
     if (onSignature) onSignature(signature);
 
@@ -215,11 +307,14 @@ export function createInputRouter({
       return;
     }
 
-    const action = findAction(signature, getBindings());
-    if (!action) return;
-
+    if (!bound) return;
     if (event) event.preventDefault();
-    onAction(action);
+
+    if (isGesture) {
+      presses.press();
+      return;
+    }
+    onAction(bound);
   }
 
   function listenForKeys() {
@@ -346,9 +441,11 @@ export function createInputRouter({
       }
     },
     captureNext(handler) {
+      presses.reset();
       captureHandler = handler;
     },
     cancelCapture() {
+      presses.reset();
       captureHandler = null;
     },
     enableMediaSession,
