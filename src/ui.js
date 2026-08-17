@@ -7,7 +7,7 @@
  */
 
 import { pointLabel } from "./match.js";
-import { ACTIONS, describeSignature } from "./input.js";
+import { ACTIONS, describeSignature, pendingLabel } from "./input.js";
 
 const FLASH_MS = 420;
 
@@ -109,6 +109,23 @@ export function createUI(handlers) {
       nodes.sideA.scrollHeight > nodes.sideA.clientHeight + 1 ||
       nodes.sideB.scrollHeight > nodes.sideB.clientHeight + 1
     );
+  }
+
+  /**
+   * Shows what the presses so far will do, while the score itself stays put.
+   * Read from across the court, so it says the outcome in words rather than
+   * only counting dots.
+   */
+  function showPending(count) {
+    const dots = count <= 3 ? "\u25CF".repeat(count) + "\u25CB".repeat(3 - count) : "\u2715";
+
+    nodes.badge.textContent = `${dots}  ${pendingLabel(count)}`;
+    nodes.badge.setAttribute("data-shown", "");
+    nodes.badge.setAttribute("data-pending", count > 3 ? "void" : "yes");
+  }
+
+  function clearPending() {
+    nodes.badge.removeAttribute("data-pending");
   }
 
   function renderBadge(state) {
@@ -250,6 +267,8 @@ export function createUI(handlers) {
   return {
     render,
     flash,
+    showPending,
+    clearPending,
     renderBindings,
     logInput,
     markListening,

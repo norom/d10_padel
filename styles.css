@@ -255,13 +255,18 @@ body {
   flex: 0 0 3px;
   background: var(--net);
   position: relative;
+  /* Above both fields, or the badge hanging off it is painted over by the side
+     that comes later in the DOM and only its left half survives. */
+  z-index: 3;
 }
 
+/* Sits below the scores rather than across them: the numbers are the thing
+   being read, and an indicator over the top of them is worse than none. */
 .net-badge {
   position: absolute;
-  top: 50%;
+  bottom: 6%;
   left: 50%;
-  transform: translate(-50%, -50%);
+  transform: translateX(-50%);
   background: var(--ball);
   color: #12180a;
   font-size: clamp(9px, 1.9vmin, 13px);
@@ -526,4 +531,31 @@ body {
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--ink-faint);
+}
+
+/* ------------------------------------------------------- pending indicator */
+
+/* Shown while a one-button press chain is still arriving. The score stays put
+   until the presses stop, so this is the only thing that answers the press —
+   which means it has to be readable from the same distance as the score. */
+.net-badge[data-pending] {
+  font-family: var(--mono);
+  font-size: clamp(15px, 3.6vmin, 26px);
+  letter-spacing: 0.08em;
+  padding: 9px 18px;
+  animation: pending-breathe 1s ease-in-out infinite;
+}
+
+.net-badge[data-pending="void"] {
+  background: var(--rule);
+  color: var(--ink-soft);
+  animation: none;
+}
+
+@keyframes pending-breathe {
+  50% { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .net-badge[data-pending] { animation: none; }
 }

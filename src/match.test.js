@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { derive, pointLabel, addPoint, undo, applyOutcome } from "./match.js";
+import { derive, pointLabel, addPoint, undo } from "./match.js";
 
 /** Build a point list from a compact string: play("AAB") === ["A","A","B"] */
 const play = (seq) => derive([...seq]);
@@ -203,27 +203,4 @@ test("adding a point leaves the original list untouched", () => {
   addPoint(before, "A");
 
   assert.deepEqual(before, [..."AAB"]);
-});
-
-test("an outcome applies to a point list, and an empty one changes nothing", () => {
-  const before = [..."AAB"];
-
-  assert.deepEqual(applyOutcome(before, "A"), [..."AABA"]);
-  assert.deepEqual(applyOutcome(before, "B"), [..."AABB"]);
-  assert.deepEqual(applyOutcome(before, "UNDO"), [..."AA"]);
-  assert.deepEqual(applyOutcome(before, null), [..."AAB"]);
-});
-
-test("re-applying an outcome to the same snapshot replaces, never stacks", () => {
-  // This is what lets a press chain correct itself: every press recomputes from
-  // where the chain started, so pressing twice yields one point to B, not a
-  // point to A followed by a point to B.
-  const snapshot = [..."AAB"];
-
-  const afterOne = applyOutcome(snapshot, "A");
-  const afterTwo = applyOutcome(snapshot, "B");
-
-  assert.deepEqual(afterOne, [..."AABA"]);
-  assert.deepEqual(afterTwo, [..."AABB"]);
-  assert.deepEqual(snapshot, [..."AAB"], "the snapshot itself is untouched");
 });

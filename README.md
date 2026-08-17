@@ -31,13 +31,13 @@ So the whole match is scored from `S`, by how many times it is pressed:
 | twice | Point to Team B |
 | three times | Undo |
 
-The score moves on the very first press and each further press **corrects** it rather than
-adding to it: press once and Team A scores immediately, press again and that point becomes
-Team B's, press a third time and it becomes an undo. Four or more presses lands back exactly
-where it started, so a fumble costs nothing.
+The score itself stays still while you press. A badge below it counts the presses and names
+what will happen — `●○○ Team A`, `●●○ Team B`, `●●● Undo` — and the score moves once, when
+you stop. Four or more presses shows `✕ Cancelled` and changes nothing, so a fumble costs
+nothing.
 
-Because nothing waits for a timer, the window between presses is a generous 1.2 seconds. There
-is no timing to get right — keep pressing until the score reads what you meant.
+You have 0.8s between presses, and the badge answers each press immediately, so there is no
+timing to guess at: press until the badge reads what you meant, then let go.
 
 Bind it under **Score everything with one button**. If you use a remote where separate buttons
 do register, bind them under **Or one button per action** instead; both work.

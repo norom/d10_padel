@@ -2,7 +2,7 @@
  * Wiring: remote and touch input in, scoreboard out, everything persisted.
  */
 
-import { derive, addPoint, undo, applyOutcome } from "./match.js";
+import { derive, addPoint, undo } from "./match.js";
 import { createStore } from "./storage.js";
 import { createUI } from "./ui.js";
 import { ACTIONS, createInputRouter, setBinding, actionForPressCount } from "./input.js";
@@ -36,37 +36,41 @@ const router = createInputRouter({
     else if (action === ACTIONS.UNDO) undoPoint();
   },
   onGesture: scoreFromPressCount,
+  onGesturePending: showPendingPresses,
 });
 
 /**
  * One button, scored by how many times it was pressed.
  *
- * Each press is applied immediately against the state the chain began from, so
- * the first press scores Team A at once and a second press replaces that with a
- * point to Team B rather than adding to it. Nothing waits, and a fumble of four
- * or more presses lands back exactly where it started.
+ * The score stays still while the presses are still arriving — only the
+ * indicator moves — and the result is applied once, when they stop. Showing
+ * each intermediate result on the score itself reads as the number changing by
+ * itself, which is worse than a short wait.
  */
-let chainStart = null;
-
 const OUTCOMES = {
   [ACTIONS.POINT_A]: "A",
   [ACTIONS.POINT_B]: "B",
   [ACTIONS.UNDO]: "UNDO",
 };
 
+function showPendingPresses(count) {
+  ui.showPending(count);
+}
+
 function scoreFromPressCount(count) {
-  if (count === 1) chainStart = points;
+  ui.clearPending();
 
   const outcome = OUTCOMES[actionForPressCount(count)] || null;
-  const next = applyOutcome(chainStart, outcome);
+  if (!outcome) {
+    ui.render(derive(points));
+    return;
+  }
 
-  // A decided match still refuses new points, exactly as the buttons do.
-  if (outcome !== "UNDO" && derive(chainStart).matchOver) return;
-
-  points = next;
-  store.savePoints(points);
-  ui.render(derive(points));
-  if (outcome === "A" || outcome === "B") ui.flash(outcome);
+  if (outcome === "UNDO") {
+    undoPoint();
+    return;
+  }
+  score(outcome);
 }
 
 // ------------------------------------------------------------------ actions

@@ -111,19 +111,6 @@ export function undo(points) {
   return points.slice(0, -1);
 }
 
-/**
- * Apply one outcome to a point list: "A", "B", "UNDO", or nothing.
- *
- * Kept separate from the actions above so a press chain can recompute from the
- * point it started at. Pressing twice then means one point to B, replacing the
- * point to A the first press showed, rather than stacking on top of it.
- */
-export function applyOutcome(points, outcome) {
-  if (outcome === "A" || outcome === "B") return addPoint(points, outcome);
-  if (outcome === "UNDO") return undo(points);
-  return [...points];
-}
-
 /** The text shown in a team's point slot: "0", "15", "30", "40", "AD",
  *  or a plain count during a tie-break. */
 export function pointLabel(state, team) {

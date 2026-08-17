@@ -32,42 +32,66 @@ export function actionForPressCount(count) {
 }
 
 /**
- * Counts presses that arrive close together, reporting the running total on
- * every press rather than waiting for the chain to end.
+ * Counts presses that arrive close together.
  *
- * Reporting immediately is what makes one button usable: the first press shows
- * a result at once, and a second press corrects it. Waiting for a window to
- * close instead makes every press feel slow and forces the user to guess the
- * timing blind, which is exactly how a double press turns into two singles.
+ * `onCount` fires on every press so the screen can show what is pending;
+ * `onResolve` fires once, when the presses stop, and is the only thing that
+ * changes the score. Splitting the two is what keeps the scoreboard still while
+ * still answering the press immediately — showing each intermediate result on
+ * the score itself reads as the number jumping around by itself.
  *
  * The timer functions are injectable so press timing can be tested without
  * waiting on a real clock.
  */
 export function createPressChain({
-  windowMs = 1200,
+  windowMs = 800,
   onCount,
+  onResolve,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
 }) {
   let count = 0;
   let timer = null;
 
-  const forget = () => {
+  const stop = () => {
     if (timer !== null) clearTimer(timer);
     timer = null;
-    count = 0;
   };
 
   return {
     press() {
       count += 1;
-      if (timer !== null) clearTimer(timer);
-      timer = setTimer(forget, windowMs);
+      stop();
+
+      timer = setTimer(() => {
+        const total = count;
+        count = 0;
+        timer = null;
+        onResolve(total);
+      }, windowMs);
+
       onCount(count);
     },
 
-    reset: forget,
+    reset() {
+      stop();
+      count = 0;
+    },
   };
+}
+
+/** What a press count will do, for the on-screen indicator. */
+export function pendingLabel(count) {
+  switch (count) {
+    case 1:
+      return "Team A";
+    case 2:
+      return "Team B";
+    case 3:
+      return "Undo";
+    default:
+      return "Cancelled";
+  }
 }
 
 /**
@@ -262,12 +286,13 @@ export function createInputRouter({
   getBindings,
   onAction,
   onGesture,
+  onGesturePending = () => {},
   onSignature,
   repeatWindowMs = 400,
-  // Nothing waits on this window, because each press is applied at once and
-  // the next one corrects it. That means it can be generous without making a
-  // single press feel slow.
-  gestureWindowMs = 1200,
+  // Long enough to press again without hurrying, short enough that the score
+  // lands promptly. The indicator answers the press immediately, so this is not
+  // felt as lag.
+  gestureWindowMs = 800,
   // The browser channels keep a hidden field focused so the document receives
   // key events. The Android wrapper gets keys natively instead, and a focused
   // field there only risks summoning the on-screen keyboard.
@@ -283,7 +308,8 @@ export function createInputRouter({
 
   const presses = createPressChain({
     windowMs: gestureWindowMs,
-    onCount: (count) => onGesture(count),
+    onCount: (count) => onGesturePending(count),
+    onResolve: (count) => onGesture(count),
   });
 
   let captureHandler = null;
