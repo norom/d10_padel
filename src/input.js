@@ -179,7 +179,16 @@ function inaudibleLoopSource(seconds = 10) {
  * @param {(action: string) => void} options.onAction
  * @param {(signature: object) => void} [options.onSignature] every press, bound or not
  */
-export function createInputRouter({ getBindings, onAction, onSignature, repeatWindowMs = 400 }) {
+export function createInputRouter({
+  getBindings,
+  onAction,
+  onSignature,
+  repeatWindowMs = 400,
+  // The browser channels keep a hidden field focused so the document receives
+  // key events. The Android wrapper gets keys natively instead, and a focused
+  // field there only risks summoning the on-screen keyboard.
+  browserChannels = true,
+}) {
   const accepts = createRepeatFilter(repeatWindowMs);
   const padButtons = new Map();
 
@@ -321,10 +330,14 @@ export function createInputRouter({ getBindings, onAction, onSignature, repeatWi
     start() {
       if (started) return;
       started = true;
+
       exposeNativeBridge();
-      listenForKeys();
-      this.refocus = listenForText();
-      listenForGamepad();
+
+      if (browserChannels) {
+        listenForKeys();
+        listenForText();
+        listenForGamepad();
+      }
     },
     captureNext(handler) {
       captureHandler = handler;

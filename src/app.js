@@ -25,6 +25,7 @@ const ui = createUI({
 });
 
 const router = createInputRouter({
+  browserChannels: !IN_WRAPPER,
   getBindings: () => bindings,
   onAction: (action) => {
     if (action === ACTIONS.POINT_A) score("A");
