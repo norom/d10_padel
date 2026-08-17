@@ -7,6 +7,9 @@ import { createStore } from "./storage.js";
 import { createUI } from "./ui.js";
 import { ACTIONS, createInputRouter } from "./input.js";
 
+/** True when running inside the Android wrapper rather than a browser tab. */
+const IN_WRAPPER = navigator.userAgent.includes("D10Wrapper");
+
 const store = createStore(window.localStorage);
 
 let { points, bindings } = store.load();
@@ -112,7 +115,9 @@ ui.renderBindings(bindings);
 keepAwake();
 document.addEventListener("pointerdown", () => keepAwake(), { once: true });
 
-if ("serviceWorker" in navigator) {
+// The wrapper already serves every file from the APK, so a second caching
+// layer would only add a way for it to go stale.
+if ("serviceWorker" in navigator && !IN_WRAPPER) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("./sw.js").catch(() => {
       // Offline support is best-effort; the app runs without it.

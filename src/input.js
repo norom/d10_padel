@@ -21,6 +21,7 @@ export const CHANNELS = {
   MEDIA: "media",
   GAMEPAD: "gamepad",
   TEXT: "text",
+  ANDROID: "android",
 };
 
 // ---------------------------------------------------------------- signatures
@@ -46,6 +47,15 @@ export function textSignature(char) {
   return { channel: CHANNELS.TEXT, char };
 }
 
+/**
+ * A key seen by the Android wrapper. Volume keys never reach a web page in
+ * Chrome, so on that build the remote arrives here instead — the wrapper reads
+ * the KeyEvent natively and hands the code to the page.
+ */
+export function androidSignature(keyCode, keyName) {
+  return { channel: CHANNELS.ANDROID, keyCode, keyName };
+}
+
 /** A stable string identifying one physical button, comparable across presses. */
 export function signatureKey(signature) {
   if (!signature) return "";
@@ -59,6 +69,9 @@ export function signatureKey(signature) {
       return `gamepad:${signature.index}`;
     case CHANNELS.TEXT:
       return `text:${signature.char}`;
+    // The name is cosmetic and varies between devices; the code is the button.
+    case CHANNELS.ANDROID:
+      return `android:${signature.keyCode}`;
     default:
       return `${signature.channel}:${JSON.stringify(signature)}`;
   }
@@ -90,6 +103,8 @@ export function describeSignature(signature) {
       return `Gamepad button ${signature.index}`;
     case CHANNELS.TEXT:
       return `Types "${signature.char}"`;
+    case CHANNELS.ANDROID:
+      return `Remote key ${signature.keyName || "unnamed"} (${signature.keyCode})`;
     default:
       return signatureKey(signature);
   }
@@ -290,10 +305,23 @@ export function createInputRouter({ getBindings, onAction, onSignature, repeatWi
     return true;
   }
 
+  /**
+   * The Android wrapper calls this from dispatchKeyEvent. It is the only way
+   * volume keys can reach the scoreboard, since Chrome never delivers them.
+   */
+  function exposeNativeBridge() {
+    window.d10Remote = {
+      key(keyCode, keyName) {
+        receive(androidSignature(Number(keyCode), keyName), null);
+      },
+    };
+  }
+
   return {
     start() {
       if (started) return;
       started = true;
+      exposeNativeBridge();
       listenForKeys();
       this.refocus = listenForText();
       listenForGamepad();

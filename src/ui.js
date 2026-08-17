@@ -200,6 +200,15 @@ export function createUI(handlers) {
 
   nodes.fullscreenBtn.addEventListener("click", toggleFullscreen);
 
+  // In the Android wrapper the browser's limitation no longer applies, and the
+  // note warning about it would be actively misleading.
+  if (navigator.userAgent.includes("D10Wrapper")) {
+    el("bindNote").textContent =
+      "This app reads the remote directly, so the volume buttons work here even " +
+      "though Chrome ignores them.";
+    nodes.fullscreenBtn.hidden = true;
+  }
+
   window.addEventListener("resize", fitScores);
   // Android reports the new size a beat after the rotation animation.
   window.addEventListener("orientationchange", () => setTimeout(fitScores, 150));
