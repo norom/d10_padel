@@ -27,6 +27,9 @@ const ui = createUI({
 const router = createInputRouter({
   browserChannels: !IN_WRAPPER,
   getBindings: () => bindings,
+  // Every press is shown on the binding screen, so a button that produces
+  // nothing is distinguishable from one that was simply not captured.
+  onSignature: (signature) => ui.logInput(signature),
   onAction: (action) => {
     if (action === ACTIONS.POINT_A) score("A");
     else if (action === ACTIONS.POINT_B) score("B");

@@ -1,7 +1,11 @@
 package com.norom.d10padel
 
 import android.app.Activity
+import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.media.AudioManager
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
@@ -17,20 +21,30 @@ import org.json.JSONObject
 /**
  * The scoreboard, wrapped so it can hear the remote.
  *
- * The D10 sends volume keys. Chrome on Android never delivers those to a web
- * page, which is why the browser version cannot be scored from the remote and
- * why this wrapper exists. An activity, unlike a page, is offered every key
- * before the system acts on it — so the whole native job is: read the key,
- * hand the code to the page, and swallow it so the volume does not move.
+ * The D10 sends volume keys, which Chrome never delivers to a web page. An
+ * activity, unlike a page, is offered every key before the system acts on it,
+ * so the native job is: read the key, hand the code to the page, and swallow it
+ * so the volume does not move.
  *
- * Everything else — scoring, undo, persistence, the display — is the same web
- * app served from the APK's assets.
+ * Two routes are needed, because Android splits keys between them:
+ *
+ *  - `dispatchKeyEvent` receives ordinary keys, volume included.
+ *  - Media keys (play, pause, next, record…) never reach an activity at all.
+ *    The system routes them to whichever MediaSession is active, so the app
+ *    holds one purely to be a legitimate recipient of those presses.
+ *
+ * Everything above the key code — scoring, undo, persistence, the display — is
+ * the same web app, served from the APK's assets.
  */
 class MainActivity : Activity() {
 
     private lateinit var web: WebView
+    private var session: MediaSession? = null
 
-    /** Serving assets over a real origin, because ES modules are blocked on file://. */
+    /** Key codes seen going down, so a key that only reports up is not missed. */
+    private val pressed = mutableSetOf<Int>()
+
+    /** ES modules are blocked on file://, so assets are served over an origin. */
     private val origin = "https://appassets.androidplatform.net"
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,8 +72,6 @@ class MainActivity : Activity() {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
-            // The page checks for this to skip its service worker and to correct
-            // the note about Chrome swallowing volume keys.
             settings.userAgentString = settings.userAgentString + " D10Wrapper/1.0"
 
             setBackgroundColor(0xFF080D13.toInt())
@@ -69,32 +81,139 @@ class MainActivity : Activity() {
 
         setContentView(web)
         web.loadUrl("$origin/assets/index.html")
+
+        startMediaSession()
     }
 
+    // ------------------------------------------------------------ ordinary keys
+
     /**
-     * Every key press the remote produces arrives here first.
-     *
-     * Back is left alone so the app can be closed. Everything else is forwarded
-     * to the page and consumed: while a scoreboard is on screen the remote's
-     * buttons are score buttons, not volume buttons.
+     * Back is left alone so the app can be closed. Everything else goes to the
+     * page and is consumed: while a scoreboard is on screen the remote's buttons
+     * are score buttons, not volume buttons.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.keyCode == KeyEvent.KEYCODE_BACK) return super.dispatchKeyEvent(event)
 
-        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-            forwardToPage(event.keyCode)
+        when (event.action) {
+            KeyEvent.ACTION_DOWN -> {
+                if (event.repeatCount == 0) {
+                    pressed.add(event.keyCode)
+                    forwardToPage(event.keyCode, event.scanCode)
+                }
+            }
+            // Some remotes report only the release. Treat an unmatched up as a press.
+            KeyEvent.ACTION_UP -> {
+                if (!pressed.remove(event.keyCode)) {
+                    forwardToPage(event.keyCode, event.scanCode)
+                }
+            }
         }
         return true
     }
 
-    private fun forwardToPage(keyCode: Int) {
+    // --------------------------------------------------------------- media keys
+
+    /**
+     * Media buttons bypass activities entirely — the system hands them to an
+     * active MediaSession. Holding one is the only way a record or play button
+     * on the remote can ever be seen.
+     */
+    private fun startMediaSession() {
+        val created = MediaSession(this, "D10PadelRemote").apply {
+            @Suppress("DEPRECATION")
+            setFlags(
+                MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or
+                    MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS
+            )
+
+            setCallback(object : MediaSession.Callback() {
+                override fun onMediaButtonEvent(intent: Intent): Boolean {
+                    val event: KeyEvent? = if (Build.VERSION.SDK_INT >= 33) {
+                        intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT)
+                    }
+
+                    if (event != null && event.action == KeyEvent.ACTION_DOWN) {
+                        runOnUiThread { forwardToPage(event.keyCode, event.scanCode) }
+                    }
+                    return true
+                }
+            })
+
+            // Claiming to be playing is what makes this session the one the
+            // system routes media buttons to.
+            setPlaybackState(
+                PlaybackState.Builder()
+                    .setActions(
+                        PlaybackState.ACTION_PLAY or
+                            PlaybackState.ACTION_PAUSE or
+                            PlaybackState.ACTION_PLAY_PAUSE or
+                            PlaybackState.ACTION_SKIP_TO_NEXT or
+                            PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+                            PlaybackState.ACTION_STOP
+                    )
+                    .setState(PlaybackState.STATE_PLAYING, 0L, 1.0f)
+                    .build()
+            )
+            isActive = true
+        }
+
+        session = created
+    }
+
+    /**
+     * Media button routing follows audio focus, so the session needs it to be
+     * chosen. Held only while the scoreboard is in front, and given back on the
+     * way out so nothing else stays interrupted.
+     */
+    @Suppress("DEPRECATION")
+    private fun setAudioFocus(hold: Boolean) {
+        val audio = getSystemService(AUDIO_SERVICE) as AudioManager
+
+        if (hold) {
+            audio.requestAudioFocus(
+                null,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
+            )
+        } else {
+            audio.abandonAudioFocus(null)
+        }
+    }
+
+    // ------------------------------------------------------------------ bridge
+
+    private fun forwardToPage(keyCode: Int, scanCode: Int) {
         val name = KeyEvent.keyCodeToString(keyCode).removePrefix("KEYCODE_")
         val quoted = JSONObject.quote(name)
 
         web.evaluateJavascript(
-            "window.d10Remote && window.d10Remote.key($keyCode, $quoted);",
+            "window.d10Remote && window.d10Remote.key($keyCode, $quoted, $scanCode);",
             null
         )
+    }
+
+    // ----------------------------------------------------------------- lifecycle
+
+    override fun onResume() {
+        super.onResume()
+        session?.isActive = true
+        setAudioFocus(true)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        setAudioFocus(false)
+    }
+
+    override fun onDestroy() {
+        session?.isActive = false
+        session?.release()
+        session = null
+        super.onDestroy()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

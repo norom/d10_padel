@@ -150,11 +150,39 @@ export function createUI(handlers) {
   // -------------------------------------------------------- binding screen
 
   function renderBindings(bindings) {
+    if (seen.length === 0) el("inputLog").classList.add("empty");
+
     for (const row of document.querySelectorAll(".bind-row")) {
       const action = row.dataset.action;
       row.querySelector(".bound").textContent = describeSignature(bindings[action]);
       row.removeAttribute("data-listening");
     }
+  }
+
+  /**
+   * A running list of everything the phone hands the page. Without it, a button
+   * that emits nothing at all looks exactly like one whose press was received
+   * but not captured — and those need completely different fixes.
+   */
+  const seen = [];
+  const SEEN_LIMIT = 8;
+
+  function logInput(signature) {
+    const description = describeSignature(signature);
+    const last = seen[0];
+
+    if (last && last.description === description) {
+      last.count += 1;
+    } else {
+      seen.unshift({ description, count: 1 });
+      seen.length = Math.min(seen.length, SEEN_LIMIT);
+    }
+
+    const node = el("inputLog");
+    node.classList.remove("empty");
+    node.textContent = seen
+      .map((entry) => (entry.count > 1 ? `${entry.description}  x${entry.count}` : entry.description))
+      .join("\n");
   }
 
   function markListening(action) {
@@ -223,6 +251,7 @@ export function createUI(handlers) {
     render,
     flash,
     renderBindings,
+    logInput,
     markListening,
     isBinding: () => !nodes.bindSheet.hidden,
     actionsInOrder: [ACTIONS.POINT_A, ACTIONS.POINT_B, ACTIONS.UNDO],

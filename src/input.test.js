@@ -104,6 +104,31 @@ test("an Android key is identified by its key code, not its name", () => {
   assert.equal(first, second);
 });
 
+test("unrecognised keys are told apart by scan code", () => {
+  // A remote can send codes Android has no name for. They all arrive as
+  // KEYCODE_UNKNOWN, so without the scan code two different buttons would share
+  // one signature and binding the second would silently steal the first.
+  const a = signatureKey(androidSignature(0, "UNKNOWN", 114));
+  const b = signatureKey(androidSignature(0, "UNKNOWN", 115));
+
+  assert.notEqual(a, b);
+});
+
+test("the same unrecognised key keeps one identity", () => {
+  assert.equal(
+    signatureKey(androidSignature(0, "UNKNOWN", 114)),
+    signatureKey(androidSignature(0, "UNKNOWN", 114)),
+  );
+});
+
+test("a recognised key ignores the scan code, so bindings survive", () => {
+  // Scan codes vary between devices; a named key is already unambiguous.
+  assert.equal(
+    signatureKey(androidSignature(24, "VOLUME_UP", 115)),
+    signatureKey(androidSignature(24, "VOLUME_UP", 0)),
+  );
+});
+
 test("different Android key codes are different buttons", () => {
   assert.notEqual(
     signatureKey(androidSignature(24, "VOLUME_UP")),

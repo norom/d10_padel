@@ -52,8 +52,8 @@ export function textSignature(char) {
  * Chrome, so on that build the remote arrives here instead — the wrapper reads
  * the KeyEvent natively and hands the code to the page.
  */
-export function androidSignature(keyCode, keyName) {
-  return { channel: CHANNELS.ANDROID, keyCode, keyName };
+export function androidSignature(keyCode, keyName, scanCode = 0) {
+  return { channel: CHANNELS.ANDROID, keyCode, keyName, scanCode };
 }
 
 /** A stable string identifying one physical button, comparable across presses. */
@@ -70,8 +70,12 @@ export function signatureKey(signature) {
     case CHANNELS.TEXT:
       return `text:${signature.char}`;
     // The name is cosmetic and varies between devices; the code is the button.
+    // Codes Android cannot name all arrive as 0, so those fall back to the scan
+    // code, which still differs per physical button.
     case CHANNELS.ANDROID:
-      return `android:${signature.keyCode}`;
+      return signature.keyCode
+        ? `android:${signature.keyCode}`
+        : `android:0/${signature.scanCode || 0}`;
     default:
       return `${signature.channel}:${JSON.stringify(signature)}`;
   }
@@ -104,7 +108,9 @@ export function describeSignature(signature) {
     case CHANNELS.TEXT:
       return `Types "${signature.char}"`;
     case CHANNELS.ANDROID:
-      return `Remote key ${signature.keyName || "unnamed"} (${signature.keyCode})`;
+      return signature.keyCode
+        ? `Remote key ${signature.keyName || "unnamed"} (${signature.keyCode})`
+        : `Remote key, unnamed (scan ${signature.scanCode || 0})`;
     default:
       return signatureKey(signature);
   }
@@ -320,8 +326,8 @@ export function createInputRouter({
    */
   function exposeNativeBridge() {
     window.d10Remote = {
-      key(keyCode, keyName) {
-        receive(androidSignature(Number(keyCode), keyName), null);
+      key(keyCode, keyName, scanCode) {
+        receive(androidSignature(Number(keyCode), keyName, Number(scanCode) || 0), null);
       },
     };
   }
