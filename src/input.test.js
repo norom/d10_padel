@@ -377,3 +377,28 @@ test("a BLE signal binds and resolves like any other signature", () => {
 test("a BLE signal describes itself by its bytes", () => {
   assert.match(describeSignature(bleSignature("0a1b")), /0A 1B/);
 });
+
+// ------------------------------------------------- known Insta360 commands
+
+test("a documented remote command names itself", () => {
+  // The D10 speaks the Insta360 remote protocol, whose commands are known. A
+  // press should read as "Shutter", not as nine bytes of hex.
+  assert.match(describeSignature(bleSignature("fceffe860003010200")), /shutter/i);
+  assert.match(describeSignature(bleSignature("fceffe860003010100")), /mode/i);
+  assert.match(describeSignature(bleSignature("fceffe860003010000")), /screen/i);
+  assert.match(describeSignature(bleSignature("fceffe860003010003")), /power/i);
+});
+
+test("an unrecognised command still shows its bytes", () => {
+  // Naming the known ones must not hide the unknown ones, which are exactly
+  // the interesting case when a new remote turns up.
+  assert.match(describeSignature(bleSignature("aabb")), /AA BB/);
+});
+
+test("naming a command does not change which button it is", () => {
+  const shutter = bleSignature("fceffe860003010200");
+  const mode = bleSignature("fceffe860003010100");
+
+  assert.equal(signatureKey(shutter), signatureKey(bleSignature("FCEFFE860003010200")));
+  assert.notEqual(signatureKey(shutter), signatureKey(mode));
+});

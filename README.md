@@ -32,6 +32,41 @@ The app listens on all three routes: ordinary key events, the media-button sessi
 subscription to `0xCE80`/`0xCE82` for A and B. Because the remote is already bonded, nothing is
 scanned for, so the app asks for Bluetooth and never for location.
 
+### The vendor protocol
+
+The D10 speaks the **Insta360 remote protocol**. Its `0xCE80` service carries three
+characteristics — `CE81` (write), `CE82` (notify), `CE83` (read) — and button presses are
+published as notifications on `CE82`:
+
+| Command | Bytes |
+| --- | --- |
+| Shutter | `fc ef fe 86 00 03 01 02 00` |
+| Mode | `fc ef fe 86 00 03 01 01 00` |
+| Screen toggle | `fc ef fe 86 00 03 01 00 00` |
+| Power off | `fc ef fe 86 00 03 01 00 03` |
+
+The app knows these, so a press shows as `Shutter button` rather than nine bytes of hex.
+Anything unrecognised still shows its bytes, which is the interesting case when a different
+remote turns up.
+
+In this protocol the **remote is the GATT server** and the camera is the client that connects
+and subscribes — which is exactly what the app does.
+
+### Why A and B may still be silent
+
+On the unit this was built against, the remote is paired to the phone as a **keyboard**, which
+is why `S` arrives as a volume key at all. In that mode the vendor channel stays dormant: the
+app connects and subscribes to `CE82` successfully, and no button produces a notification.
+Confirmed independently in nRF Connect, so it is the remote's behaviour rather than the app's.
+
+A remote in **camera mode** should instead publish all three buttons on `CE82` and stop sending
+volume keys. The app already handles that case — it would simply start receiving named
+commands.
+
+Protocol references:
+[BLE Control of Insta360 Cameras](https://medium.com/@patrickchwalek/ble-control-of-insta360-cameras-7bf6894648a4),
+[pchwalek/insta360_ble_esp32](https://github.com/pchwalek/insta360_ble_esp32).
+
 If A and B stay silent, the round can still be scored entirely from `S`:
 
 So the whole match is scored from `S`, by how many times it is pressed:

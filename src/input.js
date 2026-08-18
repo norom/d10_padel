@@ -163,6 +163,21 @@ export function bleSignature(data) {
   return { channel: CHANNELS.BLE, data: normaliseHex(data) };
 }
 
+/**
+ * Commands the D10 sends, which speaks the Insta360 remote protocol.
+ *
+ * Naming them means a press reads as "Shutter" rather than nine bytes of hex,
+ * both on the binding screen and in the diagnostic list. Anything not listed
+ * still shows its bytes, since an unrecognised command is exactly the
+ * interesting case when a different remote turns up.
+ */
+const KNOWN_COMMANDS = {
+  fceffe860003010200: "Shutter",
+  fceffe860003010100: "Mode",
+  fceffe860003010000: "Screen",
+  fceffe860003010003: "Power",
+};
+
 /** Hex is compared by its bytes, not by how it happens to be written. */
 function normaliseHex(data) {
   return String(data).replace(/[^0-9a-fA-F]/g, "").toLowerCase();
@@ -225,8 +240,10 @@ export function describeSignature(signature) {
       return signature.keyCode
         ? `Remote key ${signature.keyName || "unnamed"} (${signature.keyCode})`
         : `Remote key, unnamed (scan ${signature.scanCode || 0})`;
-    case CHANNELS.BLE:
-      return `Remote signal ${formatHex(signature.data)}`;
+    case CHANNELS.BLE: {
+      const known = KNOWN_COMMANDS[signature.data];
+      return known ? `${known} button` : `Remote signal ${formatHex(signature.data)}`;
+    }
     default:
       return signatureKey(signature);
   }
