@@ -559,3 +559,75 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .net-badge[data-pending] { animation: none; }
 }
+
+/* ----------------------------------------------------------- format picker */
+
+.format-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.format-row + .format-row {
+  margin-top: 8px;
+}
+
+.format-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 12px 14px;
+  background: #131b25;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: var(--display);
+  color: var(--ink);
+  text-align: left;
+  min-height: 56px;
+}
+
+/* The format in play is marked rather than hidden, so the sheet also answers
+   "what are we playing?" without changing anything. */
+.format-row[data-current] {
+  border-color: var(--ball);
+}
+
+.format-row[data-current] .format-name::after {
+  content: " · playing now";
+  color: var(--ball);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.format-name {
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.format-detail {
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--ink-faint);
+}
+
+.format-row:focus-visible {
+  outline: 2px solid var(--ball);
+  outline-offset: 2px;
+}
+
+/* The stats row is removed outright in formats that have no sets or games. */
+.stats[hidden] {
+  display: none;
+}
+
+/* A column with no sets or games holds only a label and a score, which read
+   better as one centred pair than spread across the full height. */
+.side--simple {
+  justify-content: center;
+}
+
+.side--simple .team {
+  margin-bottom: clamp(10px, 2.4vmin, 24px);
+}

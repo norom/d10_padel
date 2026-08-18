@@ -57,14 +57,29 @@
 
 </div>
 
-<!-- New match confirmation -->
+<!-- New match: pick a format, which also confirms clearing the score -->
 <div class="sheet" id="confirmSheet" hidden>
   <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
-    <h2 id="confirmTitle">Start a new match?</h2>
-    <p id="confirmBody">The current score will be cleared. This cannot be undone.</p>
+    <h2 id="confirmTitle">Start a new match</h2>
+    <p>Choosing a format clears the current score.</p>
+
+    <div class="format-list">
+      <button class="format-row" data-kind="tennis">
+        <span class="format-name">Tennis</span>
+        <span class="format-detail">Best of 3 sets, scored 15 / 30 / 40</span>
+      </button>
+      <button class="format-row" data-kind="americano" data-target="21">
+        <span class="format-name">Americano to 21</span>
+        <span class="format-detail">21 points played, then the round ends</span>
+      </button>
+      <button class="format-row" data-kind="americano" data-target="24">
+        <span class="format-name">Americano to 24</span>
+        <span class="format-detail">24 points played, then the round ends</span>
+      </button>
+    </div>
+
     <div class="sheet-actions">
       <button id="confirmCancel">Keep playing</button>
-      <button id="confirmOk" class="danger">New match</button>
     </div>
   </div>
 </div>
@@ -84,9 +99,9 @@
         </button>
       </div>
       <p class="bind-hint">
-        Once for Team A, twice for Team B, three times to undo. The score moves
-        on the first press and the next press corrects it, so there is no timing
-        to get right — just keep pressing until it reads what you meant.
+        Once for Team A, twice for Team B, three times to undo. A badge under the
+        score counts your presses and says what will happen, and the score moves
+        once you stop — so there is no timing to get right.
       </p>
     </div>
 

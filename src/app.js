@@ -2,7 +2,8 @@
  * Wiring: remote and touch input in, scoreboard out, everything persisted.
  */
 
-import { derive, addPoint, undo } from "./match.js";
+import { derive, addPoint, undo, pointLabel } from "./match.js";
+import { deriveAmericano, addAmericanoPoint, americanoLabel } from "./americano.js";
 import { createStore } from "./storage.js";
 import { createUI } from "./ui.js";
 import { ACTIONS, createInputRouter, setBinding, actionForPressCount } from "./input.js";
@@ -12,7 +13,7 @@ const IN_WRAPPER = navigator.userAgent.includes("D10Wrapper");
 
 const store = createStore(window.localStorage);
 
-let { points, bindings } = store.load();
+let { points, bindings, format } = store.load();
 
 const ui = createUI({
   onPoint: score,
@@ -62,7 +63,7 @@ function scoreFromPressCount(count) {
 
   const outcome = OUTCOMES[actionForPressCount(count)] || null;
   if (!outcome) {
-    ui.render(derive(points));
+    show();
     return;
   }
 
@@ -73,15 +74,63 @@ function scoreFromPressCount(count) {
   score(outcome);
 }
 
+// ------------------------------------------------------------------ formats
+
+const isAmericano = () => format.kind === "americano";
+
+function currentState() {
+  return isAmericano() ? deriveAmericano(points, format.target) : derive(points);
+}
+
+/**
+ * Turns a match state into what the screen shows. Keeping this here rather than
+ * in the UI means a format is described in one place: how it scores, what it
+ * calls itself, and which parts of the scoreboard apply to it.
+ */
+function view() {
+  const state = currentState();
+
+  if (isAmericano()) {
+    return {
+      labels: { A: americanoLabel(state, "A"), B: americanoLabel(state, "B") },
+      stats: null,
+      advantage: null,
+      badge: state.draw ? "Draw" : state.winner ? `Team ${state.winner} wins` : "",
+      status: state.matchOver ? "Round complete" : `Americano · to ${format.target}`,
+      locked: state.matchOver,
+    };
+  }
+
+  return {
+    labels: { A: pointLabel(state, "A"), B: pointLabel(state, "B") },
+    stats: { sets: state.setsWon, games: state.games },
+    advantage: state.advantage,
+    badge: state.matchOver
+      ? `Team ${state.winner} wins`
+      : state.tieBreak
+        ? "Tie-break"
+        : "",
+    status: state.matchOver ? "Match complete" : "Best of 3",
+    locked: state.matchOver,
+  };
+}
+
+function show() {
+  ui.render(view());
+}
+
 // ------------------------------------------------------------------ actions
 
 function score(team) {
-  const next = addPoint(points, team);
-  if (next === points) return; // match already decided
+  const next = isAmericano()
+    ? addAmericanoPoint(points, team, format.target)
+    : addPoint(points, team);
+
+  if (next === points) return; // the match or round is already decided
 
   points = next;
   store.savePoints(points);
-  ui.render(derive(points));
+  show();
   ui.flash(team);
 }
 
@@ -90,13 +139,18 @@ function undoPoint() {
 
   points = undo(points);
   store.savePoints(points);
-  ui.render(derive(points));
+  show();
 }
 
-function newMatch() {
+function newMatch(chosen) {
+  format = chosen;
   points = [];
+
+  store.saveFormat(format);
   store.clearMatch();
-  ui.render(derive(points));
+
+  ui.renderFormats(format);
+  show();
 }
 
 // ----------------------------------------------------------------- bindings
@@ -149,7 +203,8 @@ document.addEventListener("visibilitychange", () => {
 // ------------------------------------------------------------------- start
 
 router.start();
-ui.render(derive(points));
+ui.renderFormats(format);
+show();
 ui.renderBindings(bindings);
 
 // A wake lock needs a user gesture on some builds, so try immediately and

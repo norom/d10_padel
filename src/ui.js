@@ -6,7 +6,6 @@
  * flash that field.
  */
 
-import { pointLabel } from "./match.js";
 import { ACTIONS, describeSignature, pendingLabel } from "./input.js";
 
 const FLASH_MS = 420;
@@ -33,7 +32,6 @@ export function createUI(handlers) {
     fullscreenBtn: el("fullscreenBtn"),
     probe: el("scoreProbe"),
     confirmSheet: el("confirmSheet"),
-    confirmOk: el("confirmOk"),
     confirmCancel: el("confirmCancel"),
     bindSheet: el("bindSheet"),
     bindDone: el("bindDone"),
@@ -44,23 +42,39 @@ export function createUI(handlers) {
 
   // ------------------------------------------------------------- rendering
 
-  function render(state) {
-    nodes.scoreA.textContent = pointLabel(state, "A");
-    nodes.scoreB.textContent = pointLabel(state, "B");
+  /**
+   * Takes a view model rather than a match state, so the same screen serves
+   * both formats without knowing how either of them scores.
+   */
+  function render(view) {
+    nodes.scoreA.textContent = view.labels.A;
+    nodes.scoreB.textContent = view.labels.B;
 
-    nodes.setsA.textContent = state.setsWon.A;
-    nodes.setsB.textContent = state.setsWon.B;
-    nodes.gamesA.textContent = state.games.A;
-    nodes.gamesB.textContent = state.games.B;
+    // Sets and games mean nothing in Americano, so the row goes away entirely
+    // rather than sitting there reading zero.
+    const showStats = Boolean(view.stats);
+    for (const stats of document.querySelectorAll(".stats")) stats.hidden = !showStats;
 
-    nodes.sideA.classList.toggle("side--advantage", state.advantage === "A");
-    nodes.sideB.classList.toggle("side--advantage", state.advantage === "B");
+    // With the stats gone there are only two things left in the column, and
+    // spreading two items evenly leaves the score sitting below centre.
+    nodes.sideA.classList.toggle("side--simple", !showStats);
+    nodes.sideB.classList.toggle("side--simple", !showStats);
 
-    renderBadge(state);
+    if (showStats) {
+      nodes.setsA.textContent = view.stats.sets.A;
+      nodes.setsB.textContent = view.stats.sets.B;
+      nodes.gamesA.textContent = view.stats.games.A;
+      nodes.gamesB.textContent = view.stats.games.B;
+    }
 
-    nodes.btnA.disabled = state.matchOver;
-    nodes.btnB.disabled = state.matchOver;
-    nodes.format.textContent = state.matchOver ? "Match complete" : "Best of 3";
+    nodes.sideA.classList.toggle("side--advantage", view.advantage === "A");
+    nodes.sideB.classList.toggle("side--advantage", view.advantage === "B");
+
+    setBadge(view.badge);
+
+    nodes.btnA.disabled = view.locked;
+    nodes.btnB.disabled = view.locked;
+    nodes.format.textContent = view.status;
 
     fitScores();
   }
@@ -128,11 +142,7 @@ export function createUI(handlers) {
     nodes.badge.removeAttribute("data-pending");
   }
 
-  function renderBadge(state) {
-    let text = "";
-    if (state.matchOver) text = `Team ${state.winner} wins`;
-    else if (state.tieBreak) text = "Tie-break";
-
+  function setBadge(text) {
     nodes.badge.textContent = text;
     if (text) nodes.badge.setAttribute("data-shown", "");
     else nodes.badge.removeAttribute("data-shown");
@@ -162,6 +172,24 @@ export function createUI(handlers) {
 
   function confirmNewMatch() {
     openSheet(nodes.confirmSheet);
+  }
+
+  function formatOf(row) {
+    return row.dataset.kind === "americano"
+      ? { kind: "americano", target: Number(row.dataset.target) }
+      : { kind: "tennis" };
+  }
+
+  /** Marks what is being played, so the sheet also answers "which format is this?". */
+  function renderFormats(format) {
+    for (const row of document.querySelectorAll(".format-row")) {
+      const candidate = formatOf(row);
+      const same =
+        candidate.kind === format.kind &&
+        (format.kind !== "americano" || candidate.target === format.target);
+
+      row.toggleAttribute("data-current", same);
+    }
   }
 
   // -------------------------------------------------------- binding screen
@@ -221,10 +249,13 @@ export function createUI(handlers) {
 
   nodes.newBtn.addEventListener("click", confirmNewMatch);
   nodes.confirmCancel.addEventListener("click", () => closeSheet(nodes.confirmSheet));
-  nodes.confirmOk.addEventListener("click", () => {
-    closeSheet(nodes.confirmSheet);
-    handlers.onNewMatch();
-  });
+
+  for (const row of document.querySelectorAll(".format-row")) {
+    row.addEventListener("click", () => {
+      closeSheet(nodes.confirmSheet);
+      handlers.onNewMatch(formatOf(row));
+    });
+  }
 
   nodes.remoteBtn.addEventListener("click", () => {
     openSheet(nodes.bindSheet);
@@ -269,6 +300,7 @@ export function createUI(handlers) {
     flash,
     showPending,
     clearPending,
+    renderFormats,
     renderBindings,
     logInput,
     markListening,

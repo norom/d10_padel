@@ -102,3 +102,47 @@ test("a storage that throws does not take the scoreboard down", () => {
   assert.deepEqual(store.load(), EMPTY);
   assert.doesNotThrow(() => store.savePoints([..."A"]));
 });
+
+test("a fresh store plays tennis", () => {
+  assert.deepEqual(createStore(fakeStorage()).load().format, { kind: "tennis" });
+});
+
+test("the chosen format survives a reload", () => {
+  const storage = fakeStorage();
+
+  createStore(storage).saveFormat({ kind: "americano", target: 21 });
+
+  assert.deepEqual(createStore(storage).load().format, { kind: "americano", target: 21 });
+});
+
+test("saving the format leaves the match and bindings alone", () => {
+  const storage = fakeStorage();
+  const store = createStore(storage);
+  const bindings = { GESTURE: { channel: "android", keyCode: 24 } };
+
+  store.saveBindings(bindings);
+  store.savePoints([..."AB"]);
+  store.saveFormat({ kind: "americano", target: 24 });
+
+  const loaded = createStore(storage).load();
+  assert.deepEqual(loaded.bindings, bindings);
+  assert.deepEqual(loaded.points, ["A", "B"]);
+  assert.deepEqual(loaded.format, { kind: "americano", target: 24 });
+});
+
+test("an unknown format falls back to tennis", () => {
+  const store = createStore(fakeStorage({ "d10-padel": '{"format":{"kind":"chess"}}' }));
+
+  assert.deepEqual(store.load().format, { kind: "tennis" });
+});
+
+test("an americano target that is not a sensible number falls back to the default", () => {
+  const nonsense = ['{"format":{"kind":"americano","target":"lots"}}',
+                    '{"format":{"kind":"americano","target":0}}',
+                    '{"format":{"kind":"americano"}}'];
+
+  for (const raw of nonsense) {
+    const loaded = createStore(fakeStorage({ "d10-padel": raw })).load();
+    assert.deepEqual(loaded.format, { kind: "americano", target: 24 }, raw);
+  }
+});

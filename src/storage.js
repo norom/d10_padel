@@ -10,7 +10,26 @@
 const KEY = "d10-padel";
 const TEAMS = new Set(["A", "B"]);
 
-export const EMPTY = Object.freeze({ points: [], bindings: {} });
+const TENNIS = Object.freeze({ kind: "tennis" });
+const DEFAULT_AMERICANO_TARGET = 24;
+
+export const EMPTY = Object.freeze({ points: [], bindings: {}, format: TENNIS });
+
+/**
+ * Anything that is not a format this app knows how to play is treated as
+ * tennis. A scoreboard that refuses to open because of a stored value is worse
+ * than one that opens on the wrong format, which is one tap to correct.
+ */
+function parseFormat(value) {
+  if (!value || typeof value !== "object") return TENNIS;
+  if (value.kind !== "americano") return TENNIS;
+
+  const target = Number(value.target);
+  return {
+    kind: "americano",
+    target: Number.isInteger(target) && target > 0 ? target : DEFAULT_AMERICANO_TARGET,
+  };
+}
 
 function readRaw(storage, key) {
   try {
@@ -53,7 +72,7 @@ function parse(raw) {
       ? data.bindings
       : {};
 
-  return { points, bindings };
+  return { points, bindings, format: parseFormat(data.format) };
 }
 
 export function createStore(storage, key = KEY) {
@@ -71,6 +90,10 @@ export function createStore(storage, key = KEY) {
 
     saveBindings(bindings) {
       write({ ...read(), bindings });
+    },
+
+    saveFormat(format) {
+      write({ ...read(), format });
     },
 
     clearMatch() {

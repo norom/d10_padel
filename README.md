@@ -112,7 +112,26 @@ The screen is the court seen from above: two colour fields split by the net. Whi
 big number is on identifies the team faster than a label can at ten metres. The scoring side
 flashes on each point, which is how you confirm from across the court that the press landed.
 
-## Scoring
+## Formats
+
+**New match** offers a format, and choosing one is also the confirmation that clears the score:
+
+| Format | How it scores |
+| --- | --- |
+| Tennis | Best of 3 sets, 15 / 30 / 40, as below |
+| Americano to 21 | 21 points played, then the round ends |
+| Americano to 24 | 24 points played, then the round ends |
+
+**Americano** counts plain points — 1, 2, 3 — and the round ends when the two scores *add up*
+to the target, so 24 is always 24 points played whether it finishes 16-8 or 13-11. Every player
+gets the same number of points to play for, which is the point of the format. The higher score
+wins; level at an even target is shown as a draw, because in Americano the points themselves
+are the result rather than something to play off.
+
+Sets and games are hidden in Americano, since it has neither. The remote works identically in
+both formats.
+
+## Tennis scoring
 
 Games of 0/15/30/40 with deuce and advantage, sets at six games with a two-game margin,
 tie-break at six all won at seven by two, best of three. A decided match ignores further
