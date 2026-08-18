@@ -50,11 +50,11 @@ class MainActivity : Activity() {
     private var ble: BleRemote? = null
 
     /**
-     * The last thing the BLE channel said about itself. Connection starts before
-     * the page has loaded, so its first report would otherwise be dropped and
-     * the status line would sit empty for the whole session.
+     * What the BLE channel has reported so far. Connection starts before the
+     * page has loaded, so the early steps would otherwise be dropped and the
+     * trace would begin halfway through.
      */
-    private var bleStatus: String? = null
+    private val bleTrace = mutableListOf<String>()
     private var pageReady = false
 
     /** Key codes seen going down, so a key that only reports up is not missed. */
@@ -86,7 +86,7 @@ class MainActivity : Activity() {
 
                 override fun onPageFinished(view: WebView, url: String) {
                     pageReady = true
-                    bleStatus?.let { publishBleStatus(it) }
+                    bleTrace.forEach { publishBleStatus(it) }
                 }
             }
 
@@ -133,12 +133,12 @@ class MainActivity : Activity() {
         ble = BleRemote(
             context = this,
             onPayload = { hex -> runOnUiThread { sendToPage("window.d10Remote.ble('$hex')") } },
-            onStatus = { text -> runOnUiThread { reportBleStatus(text) } },
+            onTrace = { text -> runOnUiThread { reportBleStatus(text) } },
         ).also { it.start() }
     }
 
     private fun reportBleStatus(text: String) {
-        bleStatus = text
+        bleTrace.add(text)
         if (pageReady) publishBleStatus(text)
     }
 

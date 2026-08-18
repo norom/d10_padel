@@ -230,12 +230,27 @@ export function createUI(handlers) {
       .join("\n");
   }
 
-  /** Reports the vendor BLE channel's state, so a silent button is not ambiguous. */
+  /**
+   * A running trace of the Bluetooth connection rather than one replaced line.
+   * When A and B produce nothing there are several very different reasons —
+   * not paired, connected but the service is invisible, subscribed but silent —
+   * and only the sequence tells them apart.
+   */
+  const bleTrace = [];
+  const TRACE_LIMIT = 8;
+
   function showBleStatus(text) {
+    if (!text) return;
+
+    if (bleTrace[bleTrace.length - 1] !== text) {
+      bleTrace.push(text);
+      if (bleTrace.length > TRACE_LIMIT) bleTrace.shift();
+    }
+
     const node = el("bleStatus");
-    node.hidden = !text;
-    node.textContent = text || "";
-    node.toggleAttribute("data-live", /connected/i.test(text || ""));
+    node.hidden = false;
+    node.textContent = bleTrace.join("\n");
+    node.toggleAttribute("data-live", /listening/i.test(text));
   }
 
   function markListening(action) {
