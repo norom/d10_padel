@@ -230,6 +230,14 @@ export function createUI(handlers) {
       .join("\n");
   }
 
+  /** Reports the vendor BLE channel's state, so a silent button is not ambiguous. */
+  function showBleStatus(text) {
+    const node = el("bleStatus");
+    node.hidden = !text;
+    node.textContent = text || "";
+    node.toggleAttribute("data-live", /connected/i.test(text || ""));
+  }
+
   function markListening(action) {
     for (const row of document.querySelectorAll(".bind-row")) {
       if (row.dataset.action === action) {
@@ -280,8 +288,9 @@ export function createUI(handlers) {
   // note warning about it would be actively misleading.
   if (navigator.userAgent.includes("D10Wrapper")) {
     el("bindNote").textContent =
-      "This app reads the remote directly, so the volume buttons work here even " +
-      "though Chrome ignores them.";
+      "This app reads the remote directly: the volume keys Chrome throws away, " +
+      "and A and B, which are not keys at all but signals over the remote's own " +
+      "Bluetooth channel.";
     nodes.fullscreenBtn.hidden = true;
   }
 
@@ -303,6 +312,7 @@ export function createUI(handlers) {
     renderFormats,
     renderBindings,
     logInput,
+    showBleStatus,
     markListening,
     isBinding: () => !nodes.bindSheet.hidden,
     actionsInOrder: [ACTIONS.POINT_A, ACTIONS.POINT_B, ACTIONS.UNDO],

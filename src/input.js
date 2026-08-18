@@ -117,6 +117,7 @@ export const CHANNELS = {
   GAMEPAD: "gamepad",
   TEXT: "text",
   ANDROID: "android",
+  BLE: "ble",
 };
 
 // ---------------------------------------------------------------- signatures
@@ -151,6 +152,22 @@ export function androidSignature(keyCode, keyName, scanCode = 0) {
   return { channel: CHANNELS.ANDROID, keyCode, keyName, scanCode };
 }
 
+/**
+ * A signal pushed by the remote over its own BLE service rather than as a key.
+ *
+ * The D10's A and B buttons are not keyboard buttons at all — they talk to the
+ * camera over a vendor service, which is why nothing Android exposes as input
+ * ever saw them. `data` is the notification payload as hex.
+ */
+export function bleSignature(data) {
+  return { channel: CHANNELS.BLE, data: normaliseHex(data) };
+}
+
+/** Hex is compared by its bytes, not by how it happens to be written. */
+function normaliseHex(data) {
+  return String(data).replace(/[^0-9a-fA-F]/g, "").toLowerCase();
+}
+
 /** A stable string identifying one physical button, comparable across presses. */
 export function signatureKey(signature) {
   if (!signature) return "";
@@ -171,6 +188,8 @@ export function signatureKey(signature) {
       return signature.keyCode
         ? `android:${signature.keyCode}`
         : `android:0/${signature.scanCode || 0}`;
+    case CHANNELS.BLE:
+      return `ble:${signature.data}`;
     default:
       return `${signature.channel}:${JSON.stringify(signature)}`;
   }
@@ -206,9 +225,16 @@ export function describeSignature(signature) {
       return signature.keyCode
         ? `Remote key ${signature.keyName || "unnamed"} (${signature.keyCode})`
         : `Remote key, unnamed (scan ${signature.scanCode || 0})`;
+    case CHANNELS.BLE:
+      return `Remote signal ${formatHex(signature.data)}`;
     default:
       return signatureKey(signature);
   }
+}
+
+/** Bytes as "0A 1B", which is how they read on a screen. */
+function formatHex(data) {
+  return (String(data).match(/../g) || []).join(" ").toUpperCase();
 }
 
 /**
@@ -287,6 +313,7 @@ export function createInputRouter({
   onAction,
   onGesture,
   onGesturePending = () => {},
+  onBleStatus,
   onSignature,
   repeatWindowMs = 400,
   // Long enough to press again without hurrying, short enough that the score
@@ -450,6 +477,14 @@ export function createInputRouter({
     window.d10Remote = {
       key(keyCode, keyName, scanCode) {
         receive(androidSignature(Number(keyCode), keyName, Number(scanCode) || 0), null);
+      },
+
+      ble(data) {
+        receive(bleSignature(data), null);
+      },
+
+      bleStatus(text) {
+        if (onBleStatus) onBleStatus(String(text));
       },
     };
   }

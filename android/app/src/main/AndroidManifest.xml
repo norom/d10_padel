@@ -1,8 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- No permissions. Every file is served from the APK, so the scoreboard
-         never touches the network. -->
+    <!-- No network permission: every file is served from the APK, so the
+         scoreboard never touches the internet.
+
+         Bluetooth is needed for one thing only — the D10's A and B buttons are
+         not keyboard keys and only reach an app over the remote's own BLE
+         service. The remote is already bonded, so nothing is scanned for, which
+         is why no location permission appears here. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
     <application
         android:allowBackup="true"

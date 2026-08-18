@@ -12,6 +12,7 @@ import {
   gamepadSignature,
   textSignature,
   androidSignature,
+  bleSignature,
   signatureKey,
   findAction,
   describeSignature,
@@ -340,4 +341,39 @@ test("a press count describes what it will do", () => {
   assert.match(pendingLabel(3), /undo/i);
   assert.match(pendingLabel(4), /cancel/i);
   assert.match(pendingLabel(9), /cancel/i);
+});
+
+// ------------------------------------------------------------- BLE signals
+
+test("the same BLE payload is the same button", () => {
+  assert.equal(signatureKey(bleSignature("0102")), signatureKey(bleSignature("0102")));
+});
+
+test("different BLE payloads are different buttons", () => {
+  assert.notEqual(signatureKey(bleSignature("0102")), signatureKey(bleSignature("0103")));
+});
+
+test("payload case and spacing do not change identity", () => {
+  // The wrapper formats bytes as hex; nothing about how it is written should
+  // decide whether two presses count as the same button.
+  assert.equal(signatureKey(bleSignature("0A1B")), signatureKey(bleSignature("0a1b")));
+  assert.equal(signatureKey(bleSignature("0a 1b")), signatureKey(bleSignature("0a1b")));
+});
+
+test("a BLE signal never collides with a key of the same number", () => {
+  const ble = signatureKey(bleSignature("24"));
+  const key = signatureKey(androidSignature(24, "VOLUME_UP"));
+
+  assert.notEqual(ble, key);
+});
+
+test("a BLE signal binds and resolves like any other signature", () => {
+  const bindings = setBinding({}, ACTIONS.POINT_A, bleSignature("0102"));
+
+  assert.equal(findAction(bleSignature("0102"), bindings), ACTIONS.POINT_A);
+  assert.equal(findAction(bleSignature("0103"), bindings), null);
+});
+
+test("a BLE signal describes itself by its bytes", () => {
+  assert.match(describeSignature(bleSignature("0a1b")), /0A 1B/);
 });

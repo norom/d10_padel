@@ -631,3 +631,20 @@ body {
 .side--simple .team {
   margin-bottom: clamp(10px, 2.4vmin, 24px);
 }
+
+/* Whether the vendor BLE channel is live. Without it, a silent A button is
+   ambiguous between "not connected" and "sends nothing". */
+.ble-status {
+  margin-top: 7px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-faint);
+}
+
+.ble-status[hidden] {
+  display: none;
+}
+
+.ble-status[data-live] {
+  color: var(--green, #4cbe8b);
+}

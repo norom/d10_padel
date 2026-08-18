@@ -1,7 +1,9 @@
 package com.norom.d10padel
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ApplicationInfo
 import android.media.AudioManager
 import android.media.session.MediaSession
@@ -18,6 +20,8 @@ import android.webkit.WebViewClient
 import androidx.webkit.WebViewAssetLoader
 import org.json.JSONObject
 
+private const val BLUETOOTH_REQUEST = 1
+
 /**
  * The scoreboard, wrapped so it can hear the remote.
  *
@@ -26,12 +30,15 @@ import org.json.JSONObject
  * so the native job is: read the key, hand the code to the page, and swallow it
  * so the volume does not move.
  *
- * Two routes are needed, because Android splits keys between them:
+ * Three routes are needed, because the remote's buttons do not all travel the
+ * same way:
  *
- *  - `dispatchKeyEvent` receives ordinary keys, volume included.
+ *  - `dispatchKeyEvent` receives ordinary keys, volume included. This is S.
  *  - Media keys (play, pause, next, record…) never reach an activity at all.
  *    The system routes them to whichever MediaSession is active, so the app
  *    holds one purely to be a legitimate recipient of those presses.
+ *  - A and B are not keys at all. They are only spoken over the remote's own
+ *    BLE service, which `BleRemote` subscribes to.
  *
  * Everything above the key code — scoring, undo, persistence, the display — is
  * the same web app, served from the APK's assets.
@@ -40,6 +47,15 @@ class MainActivity : Activity() {
 
     private lateinit var web: WebView
     private var session: MediaSession? = null
+    private var ble: BleRemote? = null
+
+    /**
+     * The last thing the BLE channel said about itself. Connection starts before
+     * the page has loaded, so its first report would otherwise be dropped and
+     * the status line would sit empty for the whole session.
+     */
+    private var bleStatus: String? = null
+    private var pageReady = false
 
     /** Key codes seen going down, so a key that only reports up is not missed. */
     private val pressed = mutableSetOf<Int>()
@@ -67,6 +83,11 @@ class MainActivity : Activity() {
                     view: WebView,
                     request: WebResourceRequest
                 ): WebResourceResponse? = assetLoader.shouldInterceptRequest(request.url)
+
+                override fun onPageFinished(view: WebView, url: String) {
+                    pageReady = true
+                    bleStatus?.let { publishBleStatus(it) }
+                }
             }
 
             settings.javaScriptEnabled = true
@@ -83,6 +104,62 @@ class MainActivity : Activity() {
         web.loadUrl("$origin/assets/index.html")
 
         startMediaSession()
+        startBleWhenAllowed()
+    }
+
+    // ---------------------------------------------------------- vendor channel
+
+    /**
+     * A and B are not keyboard keys; they only reach an app over the remote's
+     * own BLE service. Connecting to an already-bonded device needs no scan, so
+     * this asks for Bluetooth alone and never for location.
+     */
+    private fun startBleWhenAllowed() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !hasBluetoothPermission()) {
+            requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), BLUETOOTH_REQUEST)
+            return
+        }
+        startBle()
+    }
+
+    private fun hasBluetoothPermission(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun startBle() {
+        if (ble != null) return
+
+        ble = BleRemote(
+            context = this,
+            onPayload = { hex -> runOnUiThread { sendToPage("window.d10Remote.ble('$hex')") } },
+            onStatus = { text -> runOnUiThread { reportBleStatus(text) } },
+        ).also { it.start() }
+    }
+
+    private fun reportBleStatus(text: String) {
+        bleStatus = text
+        if (pageReady) publishBleStatus(text)
+    }
+
+    private fun publishBleStatus(text: String) {
+        sendToPage("window.d10Remote.bleStatus(${JSONObject.quote(text)})")
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != BLUETOOTH_REQUEST) return
+
+        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
+            startBle()
+        } else {
+            // The scoreboard still works from S and the on-screen buttons.
+            reportBleStatus("Bluetooth not allowed, so A and B cannot be read")
+        }
     }
 
     // ------------------------------------------------------------ ordinary keys
@@ -190,10 +267,12 @@ class MainActivity : Activity() {
         val name = KeyEvent.keyCodeToString(keyCode).removePrefix("KEYCODE_")
         val quoted = JSONObject.quote(name)
 
-        web.evaluateJavascript(
-            "window.d10Remote && window.d10Remote.key($keyCode, $quoted, $scanCode);",
-            null
-        )
+        sendToPage("window.d10Remote.key($keyCode, $quoted, $scanCode)")
+    }
+
+    /** Guarded so a message arriving before the page has loaded is simply dropped. */
+    private fun sendToPage(call: String) {
+        web.evaluateJavascript("window.d10Remote && $call;", null)
     }
 
     // ----------------------------------------------------------------- lifecycle
@@ -210,6 +289,8 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        ble?.stop()
+        ble = null
         session?.isActive = false
         session?.release()
         session = null

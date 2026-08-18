@@ -16,12 +16,23 @@ after the first load and remembers the match if it gets closed.
 scoreboard, tap a row, and press that button on the remote. Whatever the remote sends is bound
 to that action — the app does not assume any particular key.
 
-### Only one D10 button reaches Android
+### The D10's buttons travel three different ways
 
-On the unit this was built against, **`S` is the only button any app can hear.** It sends
-volume up. `A` and `B` produce no Android input at all — not a key event, not a media button,
-nothing — because they drive the camera over the vendor's own BLE service rather than acting as
-a keyboard. No third-party app can receive them.
+The remote is really two devices in one, which is why its buttons behave so differently:
+
+| Button | How it reaches the phone |
+| --- | --- |
+| `S` | An HID keyboard key — it sends **volume up** |
+| `A`, `B` | Not keys at all. They speak the vendor's own BLE service (`0xCE80`), the private channel the camera app uses |
+
+Chrome never delivers volume keys to a web page, and no browser can reach a vendor BLE service
+on a device bonded as HID — which is why the scoreboard needs the Android app for any of it.
+
+The app listens on all three routes: ordinary key events, the media-button session, and a GATT
+subscription to `0xCE80`/`0xCE82` for A and B. Because the remote is already bonded, nothing is
+scanned for, so the app asks for Bluetooth and never for location.
+
+If A and B stay silent, the round can still be scored entirely from `S`:
 
 So the whole match is scored from `S`, by how many times it is pressed:
 
