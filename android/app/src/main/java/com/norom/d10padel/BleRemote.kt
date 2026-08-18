@@ -43,8 +43,11 @@ class BleRemote(
         private const val ATTEMPT_TIMEOUT_MS = 7000L
 
         private val SERVICE = uuid16("CE80")
+        private val COMMAND = uuid16("CE81")
         private val NOTIFY = uuid16("CE82")
+        private val INFO = uuid16("CE83")
         private val CLIENT_CONFIG = uuid16("2902")
+        private val USER_DESCRIPTION = uuid16("2901")
 
         private fun uuid16(short: String): UUID =
             UUID.fromString("0000$short-0000-1000-8000-00805f9b34fb")
@@ -67,6 +70,13 @@ class BleRemote(
     private var next = 0
     private var gatt: BluetoothGatt? = null
     private var listening = false
+
+    /**
+     * GATT allows one operation in flight at a time, so reads are queued rather
+     * than fired together — issuing a second before the first returns silently
+     * loses it.
+     */
+    private val pending = ArrayDeque<() -> Unit>()
 
     private val giveUpOnThisOne = Runnable {
         onTrace("No answer, moving on")
@@ -215,6 +225,48 @@ class BleRemote(
             characteristic: BluetoothGattCharacteristic,
         ) = deliver(characteristic, characteristic.value ?: ByteArray(0))
 
+        override fun onDescriptorRead(
+            connection: BluetoothGatt,
+            descriptor: BluetoothGattDescriptor,
+            status: Int,
+            value: ByteArray,
+        ) {
+            reportDescription(descriptor, status, value)
+            operationFinished()
+        }
+
+        @Deprecated("Kept for Android 12 and earlier, which call this form.")
+        @Suppress("DEPRECATION")
+        override fun onDescriptorRead(
+            connection: BluetoothGatt,
+            descriptor: BluetoothGattDescriptor,
+            status: Int,
+        ) {
+            reportDescription(descriptor, status, descriptor.value ?: ByteArray(0))
+            operationFinished()
+        }
+
+        override fun onCharacteristicRead(
+            connection: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+            status: Int,
+        ) {
+            reportValue(characteristic, status, value)
+            operationFinished()
+        }
+
+        @Deprecated("Kept for Android 12 and earlier, which call this form.")
+        @Suppress("DEPRECATION")
+        override fun onCharacteristicRead(
+            connection: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int,
+        ) {
+            reportValue(characteristic, status, characteristic.value ?: ByteArray(0))
+            operationFinished()
+        }
+
         override fun onDescriptorWrite(
             connection: BluetoothGatt,
             descriptor: BluetoothGattDescriptor,
@@ -224,12 +276,75 @@ class BleRemote(
                 listening = true
                 prefs.edit().putString(KEY_ADDRESS, connection.device.address).apply()
                 onTrace("Listening on ce82 — press A or B")
+                describeService(connection)
             } else {
                 onTrace("Could not switch on notifications (status $status)")
                 dropCurrent()
                 tryNext()
             }
         }
+    }
+
+    /**
+     * Asks the remote to describe itself.
+     *
+     * Each characteristic carries a user-description descriptor, which on these
+     * devices is often a plain word naming what it is for. If ce82 stays silent
+     * this is the difference between guessing at a handshake and knowing what
+     * the vendor called the thing we would be writing to.
+     */
+    private fun describeService(connection: BluetoothGatt) {
+        val service = connection.getService(SERVICE) ?: return
+
+        for (uuid in listOf(COMMAND, NOTIFY, INFO)) {
+            val characteristic = service.getCharacteristic(uuid) ?: continue
+
+            characteristic.getDescriptor(USER_DESCRIPTION)?.let { descriptor ->
+                enqueue { readDescriptor(connection, descriptor) }
+            }
+        }
+
+        // ce83 is readable, so whatever it holds is meant to be looked at.
+        service.getCharacteristic(INFO)?.let { info ->
+            enqueue { readCharacteristic(connection, info) }
+        }
+    }
+
+    private fun enqueue(operation: () -> Unit) {
+        pending.addLast(operation)
+        if (pending.size == 1) operation()
+    }
+
+    private fun operationFinished() {
+        pending.removeFirstOrNull()
+        pending.firstOrNull()?.invoke()
+    }
+
+    private fun readDescriptor(connection: BluetoothGatt, descriptor: BluetoothGattDescriptor) {
+        try {
+            if (!connection.readDescriptor(descriptor)) operationFinished()
+        } catch (denied: SecurityException) {
+            operationFinished()
+        }
+    }
+
+    private fun readCharacteristic(
+        connection: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic,
+    ) {
+        try {
+            if (!connection.readCharacteristic(characteristic)) operationFinished()
+        } catch (denied: SecurityException) {
+            operationFinished()
+        }
+    }
+
+    /** Printable text if it is text, hex if it is not. */
+    private fun readable(bytes: ByteArray): String {
+        val text = String(bytes, Charsets.UTF_8)
+        val printable = text.isNotEmpty() && text.all { it.code in 32..126 }
+
+        return if (printable) "\"$text\"" else bytes.joinToString("") { "%02x".format(it) }
     }
 
     private fun reconnectRemembered(device: BluetoothDevice) {
@@ -289,6 +404,24 @@ class BleRemote(
         } catch (unavailable: Exception) {
             Log.d(TAG, "no service cache refresh: ${unavailable.javaClass.simpleName}")
         }
+    }
+
+    private fun reportDescription(
+        descriptor: BluetoothGattDescriptor,
+        status: Int,
+        value: ByteArray,
+    ) {
+        if (status != BluetoothGatt.GATT_SUCCESS || value.isEmpty()) return
+        onTrace("${shortForm(descriptor.characteristic.uuid)} is called ${readable(value)}")
+    }
+
+    private fun reportValue(
+        characteristic: BluetoothGattCharacteristic,
+        status: Int,
+        value: ByteArray,
+    ) {
+        if (status != BluetoothGatt.GATT_SUCCESS || value.isEmpty()) return
+        onTrace("${shortForm(characteristic.uuid)} holds ${readable(value)}")
     }
 
     private fun deliver(characteristic: BluetoothGattCharacteristic, value: ByteArray) {
