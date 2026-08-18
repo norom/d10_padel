@@ -22,15 +22,12 @@ import java.util.UUID
  * they speak the vendor service 0xCE80, the private channel the camera app
  * uses, which is why nothing Android exposes as input ever saw them.
  *
- * This subscribes to that service's notify characteristic and hands whatever
- * bytes arrive to the page, where they are matched against bindings exactly
- * like a key press.
+ * Finding which bonded device is the remote means connecting and looking, and
+ * that is done strictly **one at a time**. Android allows only a handful of GATT
+ * connections at once, and a phone with a car stereo, headphones and a watch
+ * paired will use them all up before it ever reaches the remote.
  *
- * No scanning is involved. The remote is already bonded, so it can be reached
- * straight from the bonded list — which also means no location permission.
- *
- * Every step reports itself, because when a button produces nothing there are
- * several very different reasons and they need different fixes.
+ * The address that works is remembered, so later launches go straight to it.
  */
 class BleRemote(
     private val context: Context,
@@ -39,6 +36,11 @@ class BleRemote(
 ) {
     companion object {
         private const val TAG = "D10Ble"
+        private const val PREFS = "d10-ble"
+        private const val KEY_ADDRESS = "remote-address"
+
+        /** Long enough for a sleepy remote, short enough to work through a list. */
+        private const val ATTEMPT_TIMEOUT_MS = 7000L
 
         private val SERVICE = uuid16("CE80")
         private val NOTIFY = uuid16("CE82")
@@ -59,8 +61,18 @@ class BleRemote(
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private val connections = mutableMapOf<String, BluetoothGatt>()
-    private var subscribed = false
+    private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    private var queue: List<BluetoothDevice> = emptyList()
+    private var next = 0
+    private var gatt: BluetoothGatt? = null
+    private var listening = false
+
+    private val giveUpOnThisOne = Runnable {
+        onTrace("No answer, moving on")
+        dropCurrent()
+        tryNext()
+    }
 
     fun start() {
         val manager = context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
@@ -75,7 +87,7 @@ class BleRemote(
             return
         }
 
-        val candidates = try {
+        val bonded = try {
             adapter.bondedDevices.filter {
                 it.type == BluetoothDevice.DEVICE_TYPE_LE || it.type == BluetoothDevice.DEVICE_TYPE_DUAL
             }
@@ -84,88 +96,114 @@ class BleRemote(
             return
         }
 
-        if (candidates.isEmpty()) {
+        if (bonded.isEmpty()) {
             onTrace("Nothing suitable is paired — pair the D10 in Bluetooth settings")
             return
         }
 
-        onTrace("Paired: " + candidates.joinToString(", ") { safeName(it) })
-        candidates.forEach { connect(it, autoConnect = false) }
+        queue = mostLikelyFirst(bonded)
+        next = 0
+        tryNext()
     }
 
     fun stop() {
         handler.removeCallbacksAndMessages(null)
-        connections.values.forEach { closeQuietly(it) }
-        connections.clear()
-        subscribed = false
+        dropCurrent()
+        listening = false
+        queue = emptyList()
     }
 
-    private fun connect(device: BluetoothDevice, autoConnect: Boolean) {
-        try {
-            // autoConnect=false connects now. The remote is already linked to the
-            // phone for HID, so there is nothing to wait around for, and a
-            // background connect can sit forever against a device that is not
-            // advertising because it is already connected.
-            val gatt = device.connectGatt(context, autoConnect, callback, BluetoothDevice.TRANSPORT_LE)
-            if (gatt != null) connections[device.address] = gatt
-        } catch (denied: SecurityException) {
-            onTrace("Bluetooth permission was refused")
+    /**
+     * The remembered remote first, then anything whose name looks like it, then
+     * the rest. Most phones will match on the first entry and never touch the
+     * headphones at all.
+     */
+    private fun mostLikelyFirst(devices: List<BluetoothDevice>): List<BluetoothDevice> {
+        val remembered = prefs.getString(KEY_ADDRESS, null)
+
+        return devices.sortedBy {
+            when {
+                it.address == remembered -> 0
+                safeName(it).contains("d10", ignoreCase = true) -> 1
+                else -> 2
+            }
         }
     }
 
+    private fun tryNext() {
+        if (next >= queue.size) {
+            onTrace("None of the paired devices offers the ce80 service")
+            return
+        }
+
+        val device = queue[next++]
+        onTrace("Trying ${safeName(device)}…")
+
+        try {
+            // Direct connect: the remote is already linked to the phone for HID
+            // and is not advertising, so there is nothing to wait around for.
+            gatt = device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
+        } catch (denied: SecurityException) {
+            onTrace("Bluetooth permission was refused")
+            return
+        }
+
+        handler.postDelayed(giveUpOnThisOne, ATTEMPT_TIMEOUT_MS)
+    }
+
     private val callback = object : BluetoothGattCallback() {
-        override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
-            val name = safeName(gatt.device)
+        override fun onConnectionStateChange(connection: BluetoothGatt, status: Int, newState: Int) {
+            val name = safeName(connection.device)
 
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
-                    onTrace("$name: connected")
-                    refreshServiceCache(gatt)
+                    handler.removeCallbacks(giveUpOnThisOne)
+                    handler.postDelayed(giveUpOnThisOne, ATTEMPT_TIMEOUT_MS)
+                    refreshServiceCache(connection)
                     try {
-                        gatt.discoverServices()
+                        connection.discoverServices()
                     } catch (denied: SecurityException) {
                         onTrace("Bluetooth permission was refused")
                     }
                 }
 
                 BluetoothProfile.STATE_DISCONNECTED -> {
-                    if (subscribed) {
-                        onTrace("$name: dropped, reconnecting")
-                        // Now it is worth waiting in the background: the remote
-                        // sleeps between points and wakes on the next press.
-                        closeQuietly(gatt)
-                        connections.remove(gatt.device.address)
-                        handler.postDelayed({ connect(gatt.device, autoConnect = true) }, 1000)
+                    handler.removeCallbacks(giveUpOnThisOne)
+
+                    if (listening && connection.device.address == prefs.getString(KEY_ADDRESS, null)) {
+                        // The remote sleeps between points. Now it is worth
+                        // waiting in the background for it to come back.
+                        onTrace("$name asleep — press a button to wake it")
+                        dropCurrent()
+                        handler.postDelayed({ reconnectRemembered(connection.device) }, 800)
                     } else {
-                        onTrace("$name: could not connect (status $status)")
-                        closeQuietly(gatt)
-                        connections.remove(gatt.device.address)
+                        dropCurrent()
+                        tryNext()
                     }
                 }
             }
         }
 
-        override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            val name = safeName(gatt.device)
-            val services = gatt.services.orEmpty()
+        override fun onServicesDiscovered(connection: BluetoothGatt, status: Int) {
+            handler.removeCallbacks(giveUpOnThisOne)
 
-            onTrace("$name: " + services.joinToString(" ") { shortForm(it.uuid) })
+            val name = safeName(connection.device)
+            val characteristic = connection.getService(SERVICE)?.getCharacteristic(NOTIFY)
 
-            val characteristic = gatt.getService(SERVICE)?.getCharacteristic(NOTIFY)
             if (characteristic == null) {
-                if (gatt.getService(SERVICE) != null) {
-                    onTrace("$name: has ce80 but no ce82 to listen on")
-                }
-                closeQuietly(gatt)
-                connections.remove(gatt.device.address)
+                val found = connection.services.orEmpty().joinToString(" ") { shortForm(it.uuid) }
+                onTrace("$name: no ce80 (has $found)")
+                dropCurrent()
+                tryNext()
                 return
             }
 
-            subscribe(gatt, characteristic, name)
+            onTrace("$name has ce80 — switching on notifications")
+            subscribe(connection, characteristic, name)
         }
 
         override fun onCharacteristicChanged(
-            gatt: BluetoothGatt,
+            connection: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray,
         ) = deliver(characteristic, value)
@@ -173,32 +211,45 @@ class BleRemote(
         @Deprecated("Kept for Android 12 and earlier, which call this form.")
         @Suppress("DEPRECATION")
         override fun onCharacteristicChanged(
-            gatt: BluetoothGatt,
+            connection: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
         ) = deliver(characteristic, characteristic.value ?: ByteArray(0))
 
         override fun onDescriptorWrite(
-            gatt: BluetoothGatt,
+            connection: BluetoothGatt,
             descriptor: BluetoothGattDescriptor,
             status: Int,
         ) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                subscribed = true
+                listening = true
+                prefs.edit().putString(KEY_ADDRESS, connection.device.address).apply()
                 onTrace("Listening on ce82 — press A or B")
             } else {
                 onTrace("Could not switch on notifications (status $status)")
+                dropCurrent()
+                tryNext()
             }
         }
     }
 
+    private fun reconnectRemembered(device: BluetoothDevice) {
+        try {
+            gatt = device.connectGatt(context, true, callback, BluetoothDevice.TRANSPORT_LE)
+        } catch (denied: SecurityException) {
+            onTrace("Bluetooth permission was refused")
+        }
+    }
+
     private fun subscribe(
-        gatt: BluetoothGatt,
+        connection: BluetoothGatt,
         characteristic: BluetoothGattCharacteristic,
         name: String,
     ) {
         try {
-            if (!gatt.setCharacteristicNotification(characteristic, true)) {
+            if (!connection.setCharacteristicNotification(characteristic, true)) {
                 onTrace("$name: the phone refused to listen to ce82")
+                dropCurrent()
+                tryNext()
                 return
             }
 
@@ -206,17 +257,19 @@ class BleRemote(
             // the descriptor is what actually turns the stream on.
             val config = characteristic.getDescriptor(CLIENT_CONFIG)
             if (config == null) {
-                onTrace("$name: ce82 has no notify switch to turn on")
+                onTrace("$name: ce82 has no notify switch")
+                dropCurrent()
+                tryNext()
                 return
             }
 
             if (Build.VERSION.SDK_INT >= 33) {
-                gatt.writeDescriptor(config, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                connection.writeDescriptor(config, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
             } else {
                 @Suppress("DEPRECATION")
                 config.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
                 @Suppress("DEPRECATION")
-                gatt.writeDescriptor(config)
+                connection.writeDescriptor(config)
             }
         } catch (denied: SecurityException) {
             onTrace("Bluetooth permission was refused")
@@ -226,16 +279,15 @@ class BleRemote(
     /**
      * Android caches a bonded device's services. The D10 was bonded as a
      * keyboard, so that cache can describe only the HID service and discovery
-     * then never reports the vendor one. The refresh that fixes it has no public
-     * API, so it is reached by reflection and skipped if unavailable.
+     * then never reports the vendor one. The refresh that clears it has no
+     * public API, so it is reached by reflection and skipped if unavailable.
      */
-    private fun refreshServiceCache(gatt: BluetoothGatt) {
+    private fun refreshServiceCache(connection: BluetoothGatt) {
         try {
-            val refresh = gatt.javaClass.getMethod("refresh")
-            val ok = refresh.invoke(gatt) as? Boolean ?: false
-            Log.d(TAG, "service cache refresh: $ok")
+            val refresh = connection.javaClass.getMethod("refresh")
+            Log.d(TAG, "service cache refresh: ${refresh.invoke(connection)}")
         } catch (unavailable: Exception) {
-            Log.d(TAG, "service cache refresh unavailable: ${unavailable.javaClass.simpleName}")
+            Log.d(TAG, "no service cache refresh: ${unavailable.javaClass.simpleName}")
         }
     }
 
@@ -247,18 +299,21 @@ class BleRemote(
         onPayload(hex)
     }
 
+    private fun dropCurrent() {
+        val open = gatt ?: return
+        gatt = null
+        try {
+            open.disconnect()
+            open.close()
+        } catch (ignored: SecurityException) {
+            // Losing the handle on the way out is not worth crashing over.
+        }
+    }
+
     private fun safeName(device: BluetoothDevice): String =
         try {
             device.name ?: device.address
         } catch (denied: SecurityException) {
             device.address
         }
-
-    private fun closeQuietly(gatt: BluetoothGatt) {
-        try {
-            gatt.close()
-        } catch (ignored: SecurityException) {
-            // Losing the handle on the way out is not worth crashing over.
-        }
-    }
 }
