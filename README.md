@@ -52,22 +52,31 @@ remote turns up.
 In this protocol the **remote is the GATT server** and the camera is the client that connects
 and subscribes — which is exactly what the app does.
 
-### Why A and B may still be silent
+### Why A and B are unreachable
 
-On the unit this was built against, the remote is paired to the phone as a **keyboard**, which
-is why `S` arrives as a volume key at all. In that mode the vendor channel stays dormant: the
-app connects and subscribes to `CE82` successfully, and no button produces a notification.
-Confirmed independently in nRF Connect, so it is the remote's behaviour rather than the app's.
+They are not. Reading the vendor service's own descriptors settles it:
 
-A remote in **camera mode** should instead publish all three buttons on `CE82` and stop sending
-volume keys. The app already handles that case — it would simply start receiving named
-commands.
+```
+ce81  ->  "Characteristic 3"     (write)
+ce82  ->  "Characteristic 4"     (notify)
+ce83  ->  "Characteristic 5"  holding  "CHAR5_VALUE"
+```
 
-Protocol references:
-[BLE Control of Insta360 Cameras](https://medium.com/@patrickchwalek/ble-control-of-insta360-cameras-7bf6894648a4),
-[pchwalek/insta360_ble_esp32](https://github.com/pchwalek/insta360_ble_esp32).
+Those are the untouched example strings from the chip SDK's sample GATT profile. A vendor
+implementing a button protocol names these Command, Notify, Version — not `CHAR5_VALUE`. The
+service shares UUIDs with the Insta360 protocol because both are built on the same SDK sample,
+not because this remote speaks it.
 
-If A and B stay silent, the round can still be scored entirely from `S`:
+So `0xCE80` here is boilerplate that was never wired up, which agrees with everything else
+observed:
+
+- nRF Connect subscribes to `CE82` successfully and sees nothing on any button
+- The app subscribes successfully and sees nothing
+- A and B produce no key event, no media button, and no unnamed scan code either
+
+**A and B on this remote are not connected to anything a phone can reach.** That is firmware,
+not something more code solves. The BLE support is kept anyway: it costs one permission, and it
+would work immediately with a remote whose vendor service is real.
 
 So the whole match is scored from `S`, by how many times it is pressed:
 
