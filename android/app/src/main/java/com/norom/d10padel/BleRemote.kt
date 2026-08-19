@@ -55,6 +55,7 @@ class BleRemote(
         private const val OPERATION_TIMEOUT_MS = 3000L
 
         private val VENDOR_SERVICE = uuid16("CE80")
+        private val HID_SERVICE = uuid16("1812")
         private val CLIENT_CONFIG = uuid16("2902")
 
         private const val NOTIFY_OR_INDICATE =
@@ -279,14 +280,19 @@ class BleRemote(
             // report map is the prize: it declares every usage the device can
             // ever send, so it says whether A and B exist as HID buttons at all
             // rather than leaving it to be inferred from silence.
-            services
+            // The keyboard service is skipped deliberately. Android accepts
+            // reads there and never answers them — not a refusal, just silence —
+            // and one unanswered read holds up every operation behind it.
+            val readable = services
+                .filter { it.uuid != HID_SERVICE }
                 .flatMap { it.characteristics.orEmpty() }
                 .filter { it.properties and BluetoothGattCharacteristic.PROPERTY_READ != 0 }
-                // The report map first: it is the one value that settles whether
-                // A and B exist as HID buttons, so it must not be queued behind
-                // anything that might stall.
-                .sortedBy { if (shortForm(it.uuid) == "2a4b") 0 else 1 }
-                .forEach { characteristic -> enqueue { read(connection, characteristic) } }
+
+            if (services.any { it.uuid == HID_SERVICE }) {
+                onTrace("1812 not read — Android answers nothing there")
+            }
+
+            readable.forEach { characteristic -> enqueue { read(connection, characteristic) } }
         }
 
         override fun onCharacteristicChanged(
@@ -354,9 +360,10 @@ class BleRemote(
         // queued behind it.
         handler.postDelayed({
             if (operationToken == token) {
-                onTrace("(no answer, skipping)")
-                pending.removeFirstOrNull()
-                runNextOperation()
+                // Carrying on would only fire the next request into a stack that
+                // is still busy with this one, and every one after it fails.
+                onTrace("No answer — stopping here")
+                pending.clear()
             }
         }, OPERATION_TIMEOUT_MS)
 
