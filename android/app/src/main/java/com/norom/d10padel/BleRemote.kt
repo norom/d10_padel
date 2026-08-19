@@ -47,6 +47,13 @@ class BleRemote(
         /** Long enough for a sleepy remote, short enough to work through a list. */
         private const val ATTEMPT_TIMEOUT_MS = 7000L
 
+        /**
+         * A GATT operation that never calls back must not strand the queue. The
+         * HID characteristics can do exactly that, and everything queued behind
+         * them is then lost in silence.
+         */
+        private const val OPERATION_TIMEOUT_MS = 3000L
+
         private val VENDOR_SERVICE = uuid16("CE80")
         private val CLIENT_CONFIG = uuid16("2902")
 
@@ -275,6 +282,10 @@ class BleRemote(
             services
                 .flatMap { it.characteristics.orEmpty() }
                 .filter { it.properties and BluetoothGattCharacteristic.PROPERTY_READ != 0 }
+                // The report map first: it is the one value that settles whether
+                // A and B exist as HID buttons, so it must not be queued behind
+                // anything that might stall.
+                .sortedBy { if (shortForm(it.uuid) == "2a4b") 0 else 1 }
                 .forEach { characteristic -> enqueue { read(connection, characteristic) } }
         }
 
@@ -328,14 +339,34 @@ class BleRemote(
 
     // ------------------------------------------------------------ operations
 
+    private var operationToken = 0
+
     private fun enqueue(operation: () -> Unit) {
         pending.addLast(operation)
-        if (pending.size == 1) operation()
+        if (pending.size == 1) runNextOperation()
+    }
+
+    private fun runNextOperation() {
+        val operation = pending.firstOrNull() ?: return
+        val token = ++operationToken
+
+        // If the callback never comes, move on rather than stalling everything
+        // queued behind it.
+        handler.postDelayed({
+            if (operationToken == token) {
+                onTrace("(no answer, skipping)")
+                pending.removeFirstOrNull()
+                runNextOperation()
+            }
+        }, OPERATION_TIMEOUT_MS)
+
+        operation()
     }
 
     private fun operationFinished() {
+        operationToken++
         pending.removeFirstOrNull()
-        pending.firstOrNull()?.invoke()
+        runNextOperation()
     }
 
     private fun subscribe(connection: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
@@ -377,7 +408,10 @@ class BleRemote(
 
     private fun read(connection: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
         try {
-            if (!connection.readCharacteristic(characteristic)) operationFinished()
+            if (!connection.readCharacteristic(characteristic)) {
+                onTrace("${shortForm(characteristic.uuid)} would not be read")
+                operationFinished()
+            }
         } catch (denied: SecurityException) {
             operationFinished()
         }
@@ -396,7 +430,10 @@ class BleRemote(
             onTrace("$label unreadable ($status)$why")
             return
         }
-        if (value.isEmpty()) return
+        if (value.isEmpty()) {
+            onTrace("$label = (empty)")
+            return
+        }
 
         onTrace("$label = ${readable(value)}")
     }

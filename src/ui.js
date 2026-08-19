@@ -238,7 +238,7 @@ export function createUI(handlers) {
    * and only the sequence tells them apart.
    */
   const bleTrace = [];
-  const TRACE_LIMIT = 14;
+  const TRACE_LIMIT = 80;
 
   function showBleStatus(text) {
     if (!text) return;
