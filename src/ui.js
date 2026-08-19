@@ -36,6 +36,7 @@ export function createUI(handlers) {
     bindSheet: el("bindSheet"),
     bindDone: el("bindDone"),
     bindClear: el("bindClear"),
+    bindCopy: el("bindCopy"),
   };
 
   const flashTimers = { A: null, B: null };
@@ -253,6 +254,48 @@ export function createUI(handlers) {
     node.toggleAttribute("data-live", /listening/i.test(text));
   }
 
+  /**
+   * Everything the screen knows, as text. A Bluetooth dump runs to hundreds of
+   * hex characters, which is unusable if the only way to pass it on is a
+   * photograph of a phone.
+   */
+  function buildReport() {
+    const bound = [...document.querySelectorAll(".bind-row")]
+      .map((row) => `  ${row.dataset.action}: ${row.querySelector(".bound").textContent}`)
+      .join("\n");
+
+    return [
+      "D10 PADEL — DIAGNOSTICS",
+      navigator.userAgent,
+      "",
+      "BINDINGS",
+      bound,
+      "",
+      "RECEIVED",
+      el("inputLog").textContent,
+      "",
+      "BLUETOOTH",
+      el("bleStatus").textContent || "(nothing reported)",
+    ].join("\n");
+  }
+
+  function copyReport() {
+    const text = buildReport();
+
+    // The wrapper hands this to Android's clipboard, which works where the
+    // async clipboard API in a WebView often does not.
+    if (window.D10Native && typeof window.D10Native.copy === "function") {
+      window.D10Native.copy(text);
+    } else if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).catch(() => window.prompt("Copy this:", text));
+    } else {
+      window.prompt("Copy this:", text);
+    }
+
+    nodes.bindCopy.textContent = "Copied";
+    setTimeout(() => (nodes.bindCopy.textContent = "Copy report"), 1500);
+  }
+
   function markListening(action) {
     for (const row of document.querySelectorAll(".bind-row")) {
       if (row.dataset.action === action) {
@@ -289,6 +332,7 @@ export function createUI(handlers) {
     handlers.onCloseBindings();
   });
   nodes.bindClear.addEventListener("click", () => handlers.onClearBindings());
+  nodes.bindCopy.addEventListener("click", copyReport);
 
   for (const row of document.querySelectorAll(".bind-row")) {
     row.addEventListener("click", () => {

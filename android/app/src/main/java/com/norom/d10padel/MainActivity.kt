@@ -3,6 +3,8 @@ package com.norom.d10padel
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.content.pm.ApplicationInfo
 import android.media.AudioManager
@@ -16,6 +18,7 @@ import android.view.WindowManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
+import android.webkit.JavascriptInterface
 import android.webkit.WebViewClient
 import androidx.webkit.WebViewAssetLoader
 import org.json.JSONObject
@@ -99,6 +102,19 @@ class MainActivity : Activity() {
             isVerticalScrollBarEnabled = false
             isHorizontalScrollBarEnabled = false
         }
+
+        // Lets the diagnostics screen put its report on the clipboard. Long hex
+        // dumps are unusable if the only way to relay them is a screenshot.
+        web.addJavascriptInterface(
+            object {
+                @JavascriptInterface
+                fun copy(text: String) {
+                    val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("D10 diagnostics", text))
+                }
+            },
+            "D10Native",
+        )
 
         setContentView(web)
         web.loadUrl("$origin/assets/index.html")

@@ -54,6 +54,20 @@ class BleRemote(
             BluetoothGattCharacteristic.PROPERTY_NOTIFY or
                 BluetoothGattCharacteristic.PROPERTY_INDICATE
 
+        /** The standard characteristics worth naming when they are reported. */
+        private val WELL_KNOWN = mapOf(
+            "2a00" to "device name",
+            "2a24" to "model",
+            "2a25" to "serial",
+            "2a26" to "firmware",
+            "2a27" to "hardware",
+            "2a28" to "software",
+            "2a29" to "manufacturer",
+            "2a4a" to "HID info",
+            "2a4b" to "HID report map",
+            "2a50" to "PnP id",
+        )
+
         private fun uuid16(short: String): UUID =
             UUID.fromString("0000$short-0000-1000-8000-00805f9b34fb")
 
@@ -232,6 +246,13 @@ class BleRemote(
 
             onTrace("$name has " + services.joinToString(" ") { shortForm(it.uuid) })
 
+            services.forEach { service ->
+                val members = service.characteristics.orEmpty().joinToString(" ") {
+                    shortForm(it.uuid) + properties(it)
+                }
+                if (members.isNotEmpty()) onTrace("  ${shortForm(service.uuid)}: $members")
+            }
+
             if (notifiable.isEmpty()) {
                 onTrace("$name has nothing that can notify")
                 dropCurrent()
@@ -246,6 +267,15 @@ class BleRemote(
             notifiable.forEach { characteristic ->
                 enqueue { subscribe(connection, characteristic) }
             }
+
+            // Then read everything the remote is willing to show. The HID
+            // report map is the prize: it declares every usage the device can
+            // ever send, so it says whether A and B exist as HID buttons at all
+            // rather than leaving it to be inferred from silence.
+            services
+                .flatMap { it.characteristics.orEmpty() }
+                .filter { it.properties and BluetoothGattCharacteristic.PROPERTY_READ != 0 }
+                .forEach { characteristic -> enqueue { read(connection, characteristic) } }
         }
 
         override fun onCharacteristicChanged(
@@ -260,6 +290,27 @@ class BleRemote(
             connection: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
         ) = deliver(characteristic, characteristic.value ?: ByteArray(0))
+
+        override fun onCharacteristicRead(
+            connection: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+            status: Int,
+        ) {
+            reportRead(characteristic, status, value)
+            operationFinished()
+        }
+
+        @Deprecated("Kept for Android 12 and earlier, which call this form.")
+        @Suppress("DEPRECATION")
+        override fun onCharacteristicRead(
+            connection: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int,
+        ) {
+            reportRead(characteristic, status, characteristic.value ?: ByteArray(0))
+            operationFinished()
+        }
 
         override fun onDescriptorWrite(
             connection: BluetoothGatt,
@@ -324,6 +375,40 @@ class BleRemote(
         }
     }
 
+    private fun read(connection: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
+        try {
+            if (!connection.readCharacteristic(characteristic)) operationFinished()
+        } catch (denied: SecurityException) {
+            operationFinished()
+        }
+    }
+
+    private fun reportRead(
+        characteristic: BluetoothGattCharacteristic,
+        status: Int,
+        value: ByteArray,
+    ) {
+        val short = shortForm(characteristic.uuid)
+        val label = WELL_KNOWN[short]?.let { "$short ($it)" } ?: short
+
+        if (status != BluetoothGatt.GATT_SUCCESS) {
+            val why = if (status == 5 || status == 15) " — needs pairing" else ""
+            onTrace("$label unreadable ($status)$why")
+            return
+        }
+        if (value.isEmpty()) return
+
+        onTrace("$label = ${readable(value)}")
+    }
+
+    /** Printable text if it is text, hex if it is not. */
+    private fun readable(bytes: ByteArray): String {
+        val text = String(bytes, Charsets.UTF_8)
+        val printable = text.isNotEmpty() && text.all { it.code in 32..126 }
+
+        return if (printable) text else bytes.joinToString("") { "%02x".format(it) }
+    }
+
     private fun reconnectRemembered(device: BluetoothDevice) {
         try {
             gatt = device.connectGatt(context, true, callback, BluetoothDevice.TRANSPORT_LE)
@@ -354,6 +439,19 @@ class BleRemote(
         val hex = value.joinToString("") { "%02x".format(it) }
         Log.d(TAG, "notify $source $hex")
         onPayload(source, hex)
+    }
+
+    /** r=read w=write n=notify i=indicate, so the dump shows what each can do. */
+    private fun properties(characteristic: BluetoothGattCharacteristic): String {
+        val p = characteristic.properties
+        val flags = buildString {
+            if (p and BluetoothGattCharacteristic.PROPERTY_READ != 0) append("r")
+            if (p and BluetoothGattCharacteristic.PROPERTY_WRITE != 0) append("w")
+            if (p and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0) append("W")
+            if (p and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) append("n")
+            if (p and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0) append("i")
+        }
+        return if (flags.isEmpty()) "" else "[$flags]"
     }
 
     private fun dropCurrent() {
