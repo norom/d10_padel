@@ -159,8 +159,12 @@ export function androidSignature(keyCode, keyName, scanCode = 0) {
  * camera over a vendor service, which is why nothing Android exposes as input
  * ever saw them. `data` is the notification payload as hex.
  */
-export function bleSignature(data) {
-  return { channel: CHANNELS.BLE, data: normaliseHex(data) };
+export function bleSignature(source, data) {
+  return {
+    channel: CHANNELS.BLE,
+    source: String(source).toLowerCase(),
+    data: normaliseHex(data),
+  };
 }
 
 /**
@@ -203,8 +207,11 @@ export function signatureKey(signature) {
       return signature.keyCode
         ? `android:${signature.keyCode}`
         : `android:0/${signature.scanCode || 0}`;
+    // Several characteristics are listened to at once and two of them can
+    // easily emit the same short payload, so where it came from is part of
+    // which button it is.
     case CHANNELS.BLE:
-      return `ble:${signature.data}`;
+      return `ble:${signature.source}:${signature.data}`;
     default:
       return `${signature.channel}:${JSON.stringify(signature)}`;
   }
@@ -242,7 +249,9 @@ export function describeSignature(signature) {
         : `Remote key, unnamed (scan ${signature.scanCode || 0})`;
     case CHANNELS.BLE: {
       const known = KNOWN_COMMANDS[signature.data];
-      return known ? `${known} button` : `Remote signal ${formatHex(signature.data)}`;
+      return known
+        ? `${known} button`
+        : `Signal on ${signature.source}: ${formatHex(signature.data)}`;
     }
     default:
       return signatureKey(signature);
@@ -496,8 +505,8 @@ export function createInputRouter({
         receive(androidSignature(Number(keyCode), keyName, Number(scanCode) || 0), null);
       },
 
-      ble(data) {
-        receive(bleSignature(data), null);
+      ble(source, data) {
+        receive(bleSignature(source, data), null);
       },
 
       bleStatus(text) {

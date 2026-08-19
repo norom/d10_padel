@@ -345,37 +345,43 @@ test("a press count describes what it will do", () => {
 
 // ------------------------------------------------------------- BLE signals
 
-test("the same BLE payload is the same button", () => {
-  assert.equal(signatureKey(bleSignature("0102")), signatureKey(bleSignature("0102")));
+test("the same BLE payload from the same place is the same button", () => {
+  assert.equal(signatureKey(bleSignature("ce82", "0102")), signatureKey(bleSignature("ce82", "0102")));
 });
 
 test("different BLE payloads are different buttons", () => {
-  assert.notEqual(signatureKey(bleSignature("0102")), signatureKey(bleSignature("0103")));
+  assert.notEqual(signatureKey(bleSignature("ce82", "0102")), signatureKey(bleSignature("ce82", "0103")));
+});
+
+test("the same bytes from a different characteristic are a different button", () => {
+  // Listening on every notifiable characteristic means two of them can easily
+  // emit the same short payload without meaning the same thing.
+  assert.notEqual(signatureKey(bleSignature("ce82", "01")), signatureKey(bleSignature("2a4d", "01")));
 });
 
 test("payload case and spacing do not change identity", () => {
   // The wrapper formats bytes as hex; nothing about how it is written should
   // decide whether two presses count as the same button.
-  assert.equal(signatureKey(bleSignature("0A1B")), signatureKey(bleSignature("0a1b")));
-  assert.equal(signatureKey(bleSignature("0a 1b")), signatureKey(bleSignature("0a1b")));
+  assert.equal(signatureKey(bleSignature("ce82", "0A1B")), signatureKey(bleSignature("ce82", "0a1b")));
+  assert.equal(signatureKey(bleSignature("ce82", "0a 1b")), signatureKey(bleSignature("ce82", "0a1b")));
 });
 
 test("a BLE signal never collides with a key of the same number", () => {
-  const ble = signatureKey(bleSignature("24"));
+  const ble = signatureKey(bleSignature("ce82", "24"));
   const key = signatureKey(androidSignature(24, "VOLUME_UP"));
 
   assert.notEqual(ble, key);
 });
 
 test("a BLE signal binds and resolves like any other signature", () => {
-  const bindings = setBinding({}, ACTIONS.POINT_A, bleSignature("0102"));
+  const bindings = setBinding({}, ACTIONS.POINT_A, bleSignature("ce82", "0102"));
 
-  assert.equal(findAction(bleSignature("0102"), bindings), ACTIONS.POINT_A);
-  assert.equal(findAction(bleSignature("0103"), bindings), null);
+  assert.equal(findAction(bleSignature("ce82", "0102"), bindings), ACTIONS.POINT_A);
+  assert.equal(findAction(bleSignature("ce82", "0103"), bindings), null);
 });
 
 test("a BLE signal describes itself by its bytes", () => {
-  assert.match(describeSignature(bleSignature("0a1b")), /0A 1B/);
+  assert.match(describeSignature(bleSignature("ce82", "0a1b")), /0A 1B/);
 });
 
 // ------------------------------------------------- known Insta360 commands
@@ -383,22 +389,28 @@ test("a BLE signal describes itself by its bytes", () => {
 test("a documented remote command names itself", () => {
   // The D10 speaks the Insta360 remote protocol, whose commands are known. A
   // press should read as "Shutter", not as nine bytes of hex.
-  assert.match(describeSignature(bleSignature("fceffe860003010200")), /shutter/i);
-  assert.match(describeSignature(bleSignature("fceffe860003010100")), /mode/i);
-  assert.match(describeSignature(bleSignature("fceffe860003010000")), /screen/i);
-  assert.match(describeSignature(bleSignature("fceffe860003010003")), /power/i);
+  assert.match(describeSignature(bleSignature("ce82", "fceffe860003010200")), /shutter/i);
+  assert.match(describeSignature(bleSignature("ce82", "fceffe860003010100")), /mode/i);
+  assert.match(describeSignature(bleSignature("ce82", "fceffe860003010000")), /screen/i);
+  assert.match(describeSignature(bleSignature("ce82", "fceffe860003010003")), /power/i);
 });
 
 test("an unrecognised command still shows its bytes", () => {
   // Naming the known ones must not hide the unknown ones, which are exactly
   // the interesting case when a new remote turns up.
-  assert.match(describeSignature(bleSignature("aabb")), /AA BB/);
+  assert.match(describeSignature(bleSignature("ce82", "aabb")), /AA BB/);
 });
 
 test("naming a command does not change which button it is", () => {
-  const shutter = bleSignature("fceffe860003010200");
-  const mode = bleSignature("fceffe860003010100");
+  const shutter = bleSignature("ce82", "fceffe860003010200");
+  const mode = bleSignature("ce82", "fceffe860003010100");
 
-  assert.equal(signatureKey(shutter), signatureKey(bleSignature("FCEFFE860003010200")));
+  assert.equal(signatureKey(shutter), signatureKey(bleSignature("CE82", "FCEFFE860003010200")));
   assert.notEqual(signatureKey(shutter), signatureKey(mode));
+});
+
+test("an unnamed signal says where it came from", () => {
+  // With several characteristics being listened to at once, "which one spoke"
+  // is the first thing worth knowing about an unrecognised signal.
+  assert.match(describeSignature(bleSignature("2a4d", "0102")), /2a4d/i);
 });

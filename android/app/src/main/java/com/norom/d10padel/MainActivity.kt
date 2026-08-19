@@ -132,7 +132,9 @@ class MainActivity : Activity() {
 
         ble = BleRemote(
             context = this,
-            onPayload = { hex -> runOnUiThread { sendToPage("window.d10Remote.ble('$hex')") } },
+            onPayload = { source, hex ->
+                runOnUiThread { sendToPage("window.d10Remote.ble('$source', '$hex')") }
+            },
             onTrace = { text -> runOnUiThread { reportBleStatus(text) } },
         ).also { it.start() }
     }

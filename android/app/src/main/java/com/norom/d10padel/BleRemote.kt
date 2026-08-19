@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
+import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.content.Context
@@ -17,21 +18,25 @@ import java.util.UUID
 /**
  * The remote's other half.
  *
- * The D10 is two devices in one. Its S button is an HID keyboard key, which the
- * activity receives as a volume press. Its A and B buttons are not keys at all:
- * they speak the vendor service 0xCE80, the private channel the camera app
- * uses, which is why nothing Android exposes as input ever saw them.
+ * The D10's S button is an HID keyboard key, which the activity receives as a
+ * volume press. A and B are not keys, and where their presses go — if anywhere —
+ * is not known. So this does not guess: it connects to the remote and subscribes
+ * to **every characteristic that can notify**, on every service.
  *
- * Finding which bonded device is the remote means connecting and looking, and
- * that is done strictly **one at a time**. Android allows only a handful of GATT
- * connections at once, and a phone with a car stereo, headphones and a watch
- * paired will use them all up before it ever reaches the remote.
+ * That matters because a button whose reports land somewhere unexpected is
+ * exactly the case that listening to one likely characteristic will miss. Where
+ * a signal came from is carried alongside its bytes, so two characteristics
+ * emitting the same short payload stay distinguishable.
  *
- * The address that works is remembered, so later launches go straight to it.
+ * No scanning is involved. The remote is already bonded, so it is reached from
+ * the bonded list — which also means no location permission. Devices are tried
+ * strictly one at a time: Android allows only a handful of GATT connections, and
+ * a phone with a car stereo, headphones and a watch paired will use them all up
+ * before it ever reaches the remote.
  */
 class BleRemote(
     private val context: Context,
-    private val onPayload: (String) -> Unit,
+    private val onPayload: (String, String) -> Unit,
     private val onTrace: (String) -> Unit,
 ) {
     companion object {
@@ -42,12 +47,12 @@ class BleRemote(
         /** Long enough for a sleepy remote, short enough to work through a list. */
         private const val ATTEMPT_TIMEOUT_MS = 7000L
 
-        private val SERVICE = uuid16("CE80")
-        private val COMMAND = uuid16("CE81")
-        private val NOTIFY = uuid16("CE82")
-        private val INFO = uuid16("CE83")
+        private val VENDOR_SERVICE = uuid16("CE80")
         private val CLIENT_CONFIG = uuid16("2902")
-        private val USER_DESCRIPTION = uuid16("2901")
+
+        private const val NOTIFY_OR_INDICATE =
+            BluetoothGattCharacteristic.PROPERTY_NOTIFY or
+                BluetoothGattCharacteristic.PROPERTY_INDICATE
 
         private fun uuid16(short: String): UUID =
             UUID.fromString("0000$short-0000-1000-8000-00805f9b34fb")
@@ -72,9 +77,9 @@ class BleRemote(
     private var listening = false
 
     /**
-     * GATT allows one operation in flight at a time, so reads are queued rather
-     * than fired together — issuing a second before the first returns silently
-     * loses it.
+     * GATT allows one operation in flight at a time, so the subscriptions are
+     * queued — issuing a second descriptor write before the first returns
+     * silently loses it, which with a dozen characteristics means most of them.
      */
     private val pending = ArrayDeque<() -> Unit>()
 
@@ -118,6 +123,7 @@ class BleRemote(
 
     fun stop() {
         handler.removeCallbacksAndMessages(null)
+        pending.clear()
         dropCurrent()
         listening = false
         queue = emptyList()
@@ -125,7 +131,7 @@ class BleRemote(
 
     /**
      * The remembered remote first, then anything whose name looks like it, then
-     * the rest. Most phones will match on the first entry and never touch the
+     * the rest. Most phones match on the first entry and never touch the
      * headphones at all.
      */
     private fun mostLikelyFirst(devices: List<BluetoothDevice>): List<BluetoothDevice> {
@@ -140,9 +146,22 @@ class BleRemote(
         }
     }
 
+    /**
+     * Accepted if it carries the vendor service, is named like the remote, or is
+     * the one that worked last time. Without this it would latch onto the first
+     * paired thing with a notification to offer, such as a watch.
+     */
+    private fun looksLikeTheRemote(
+        device: BluetoothDevice,
+        services: List<BluetoothGattService>,
+    ): Boolean =
+        services.any { it.uuid == VENDOR_SERVICE } ||
+            safeName(device).contains("d10", ignoreCase = true) ||
+            device.address == prefs.getString(KEY_ADDRESS, null)
+
     private fun tryNext() {
         if (next >= queue.size) {
-            onTrace("None of the paired devices offers the ce80 service")
+            onTrace("None of the paired devices looks like the remote")
             return
         }
 
@@ -179,6 +198,7 @@ class BleRemote(
 
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     handler.removeCallbacks(giveUpOnThisOne)
+                    pending.clear()
 
                     if (listening && connection.device.address == prefs.getString(KEY_ADDRESS, null)) {
                         // The remote sleeps between points. Now it is worth
@@ -198,18 +218,34 @@ class BleRemote(
             handler.removeCallbacks(giveUpOnThisOne)
 
             val name = safeName(connection.device)
-            val characteristic = connection.getService(SERVICE)?.getCharacteristic(NOTIFY)
+            val services = connection.services.orEmpty()
 
-            if (characteristic == null) {
-                val found = connection.services.orEmpty().joinToString(" ") { shortForm(it.uuid) }
-                onTrace("$name: no ce80 (has $found)")
+            val notifiable = services
+                .flatMap { it.characteristics.orEmpty() }
+                .filter { it.properties and NOTIFY_OR_INDICATE != 0 }
+
+            if (!looksLikeTheRemote(connection.device, services)) {
                 dropCurrent()
                 tryNext()
                 return
             }
 
-            onTrace("$name has ce80 — switching on notifications")
-            subscribe(connection, characteristic, name)
+            onTrace("$name has " + services.joinToString(" ") { shortForm(it.uuid) })
+
+            if (notifiable.isEmpty()) {
+                onTrace("$name has nothing that can notify")
+                dropCurrent()
+                tryNext()
+                return
+            }
+
+            listening = true
+            prefs.edit().putString(KEY_ADDRESS, connection.device.address).apply()
+            onTrace("Listening on " + notifiable.joinToString(" ") { shortForm(it.uuid) })
+
+            notifiable.forEach { characteristic ->
+                enqueue { subscribe(connection, characteristic) }
+            }
         }
 
         override fun onCharacteristicChanged(
@@ -225,90 +261,21 @@ class BleRemote(
             characteristic: BluetoothGattCharacteristic,
         ) = deliver(characteristic, characteristic.value ?: ByteArray(0))
 
-        override fun onDescriptorRead(
-            connection: BluetoothGatt,
-            descriptor: BluetoothGattDescriptor,
-            status: Int,
-            value: ByteArray,
-        ) {
-            reportDescription(descriptor, status, value)
-            operationFinished()
-        }
-
-        @Deprecated("Kept for Android 12 and earlier, which call this form.")
-        @Suppress("DEPRECATION")
-        override fun onDescriptorRead(
-            connection: BluetoothGatt,
-            descriptor: BluetoothGattDescriptor,
-            status: Int,
-        ) {
-            reportDescription(descriptor, status, descriptor.value ?: ByteArray(0))
-            operationFinished()
-        }
-
-        override fun onCharacteristicRead(
-            connection: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic,
-            value: ByteArray,
-            status: Int,
-        ) {
-            reportValue(characteristic, status, value)
-            operationFinished()
-        }
-
-        @Deprecated("Kept for Android 12 and earlier, which call this form.")
-        @Suppress("DEPRECATION")
-        override fun onCharacteristicRead(
-            connection: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic,
-            status: Int,
-        ) {
-            reportValue(characteristic, status, characteristic.value ?: ByteArray(0))
-            operationFinished()
-        }
-
         override fun onDescriptorWrite(
             connection: BluetoothGatt,
             descriptor: BluetoothGattDescriptor,
             status: Int,
         ) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                listening = true
-                prefs.edit().putString(KEY_ADDRESS, connection.device.address).apply()
-                onTrace("Listening on ce82 — press A or B")
-                describeService(connection)
-            } else {
-                onTrace("Could not switch on notifications (status $status)")
-                dropCurrent()
-                tryNext()
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                // Android reserves the HID service for itself, so being turned
+                // away there is expected and worth saying plainly.
+                onTrace("${shortForm(descriptor.characteristic.uuid)} refused ($status)")
             }
+            operationFinished()
         }
     }
 
-    /**
-     * Asks the remote to describe itself.
-     *
-     * Each characteristic carries a user-description descriptor, which on these
-     * devices is often a plain word naming what it is for. If ce82 stays silent
-     * this is the difference between guessing at a handshake and knowing what
-     * the vendor called the thing we would be writing to.
-     */
-    private fun describeService(connection: BluetoothGatt) {
-        val service = connection.getService(SERVICE) ?: return
-
-        for (uuid in listOf(COMMAND, NOTIFY, INFO)) {
-            val characteristic = service.getCharacteristic(uuid) ?: continue
-
-            characteristic.getDescriptor(USER_DESCRIPTION)?.let { descriptor ->
-                enqueue { readDescriptor(connection, descriptor) }
-            }
-        }
-
-        // ce83 is readable, so whatever it holds is meant to be looked at.
-        service.getCharacteristic(INFO)?.let { info ->
-            enqueue { readCharacteristic(connection, info) }
-        }
-    }
+    // ------------------------------------------------------------ operations
 
     private fun enqueue(operation: () -> Unit) {
         pending.addLast(operation)
@@ -320,31 +287,41 @@ class BleRemote(
         pending.firstOrNull()?.invoke()
     }
 
-    private fun readDescriptor(connection: BluetoothGatt, descriptor: BluetoothGattDescriptor) {
+    private fun subscribe(connection: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
         try {
-            if (!connection.readDescriptor(descriptor)) operationFinished()
+            if (!connection.setCharacteristicNotification(characteristic, true)) {
+                onTrace("${shortForm(characteristic.uuid)} refused")
+                operationFinished()
+                return
+            }
+
+            // Turning on notification is only half of it; writing the descriptor
+            // is what actually starts the stream. Some report characteristics
+            // have no descriptor and notify regardless.
+            val config = characteristic.getDescriptor(CLIENT_CONFIG)
+            if (config == null) {
+                operationFinished()
+                return
+            }
+
+            val enable =
+                if (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) {
+                    BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                } else {
+                    BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+                }
+
+            if (Build.VERSION.SDK_INT >= 33) {
+                connection.writeDescriptor(config, enable)
+            } else {
+                @Suppress("DEPRECATION")
+                config.value = enable
+                @Suppress("DEPRECATION")
+                connection.writeDescriptor(config)
+            }
         } catch (denied: SecurityException) {
             operationFinished()
         }
-    }
-
-    private fun readCharacteristic(
-        connection: BluetoothGatt,
-        characteristic: BluetoothGattCharacteristic,
-    ) {
-        try {
-            if (!connection.readCharacteristic(characteristic)) operationFinished()
-        } catch (denied: SecurityException) {
-            operationFinished()
-        }
-    }
-
-    /** Printable text if it is text, hex if it is not. */
-    private fun readable(bytes: ByteArray): String {
-        val text = String(bytes, Charsets.UTF_8)
-        val printable = text.isNotEmpty() && text.all { it.code in 32..126 }
-
-        return if (printable) "\"$text\"" else bytes.joinToString("") { "%02x".format(it) }
     }
 
     private fun reconnectRemembered(device: BluetoothDevice) {
@@ -355,47 +332,11 @@ class BleRemote(
         }
     }
 
-    private fun subscribe(
-        connection: BluetoothGatt,
-        characteristic: BluetoothGattCharacteristic,
-        name: String,
-    ) {
-        try {
-            if (!connection.setCharacteristicNotification(characteristic, true)) {
-                onTrace("$name: the phone refused to listen to ce82")
-                dropCurrent()
-                tryNext()
-                return
-            }
-
-            // Telling the characteristic to notify is only half of it; writing
-            // the descriptor is what actually turns the stream on.
-            val config = characteristic.getDescriptor(CLIENT_CONFIG)
-            if (config == null) {
-                onTrace("$name: ce82 has no notify switch")
-                dropCurrent()
-                tryNext()
-                return
-            }
-
-            if (Build.VERSION.SDK_INT >= 33) {
-                connection.writeDescriptor(config, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-            } else {
-                @Suppress("DEPRECATION")
-                config.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                @Suppress("DEPRECATION")
-                connection.writeDescriptor(config)
-            }
-        } catch (denied: SecurityException) {
-            onTrace("Bluetooth permission was refused")
-        }
-    }
-
     /**
      * Android caches a bonded device's services. The D10 was bonded as a
      * keyboard, so that cache can describe only the HID service and discovery
-     * then never reports the vendor one. The refresh that clears it has no
-     * public API, so it is reached by reflection and skipped if unavailable.
+     * then never reports the others. The refresh that clears it has no public
+     * API, so it is reached by reflection and skipped if unavailable.
      */
     private fun refreshServiceCache(connection: BluetoothGatt) {
         try {
@@ -406,30 +347,13 @@ class BleRemote(
         }
     }
 
-    private fun reportDescription(
-        descriptor: BluetoothGattDescriptor,
-        status: Int,
-        value: ByteArray,
-    ) {
-        if (status != BluetoothGatt.GATT_SUCCESS || value.isEmpty()) return
-        onTrace("${shortForm(descriptor.characteristic.uuid)} is called ${readable(value)}")
-    }
-
-    private fun reportValue(
-        characteristic: BluetoothGattCharacteristic,
-        status: Int,
-        value: ByteArray,
-    ) {
-        if (status != BluetoothGatt.GATT_SUCCESS || value.isEmpty()) return
-        onTrace("${shortForm(characteristic.uuid)} holds ${readable(value)}")
-    }
-
     private fun deliver(characteristic: BluetoothGattCharacteristic, value: ByteArray) {
-        if (characteristic.uuid != NOTIFY || value.isEmpty()) return
+        if (value.isEmpty()) return
 
+        val source = shortForm(characteristic.uuid)
         val hex = value.joinToString("") { "%02x".format(it) }
-        Log.d(TAG, "notify $hex")
-        onPayload(hex)
+        Log.d(TAG, "notify $source $hex")
+        onPayload(source, hex)
     }
 
     private fun dropCurrent() {
